@@ -6,6 +6,21 @@ import fs from 'fs'
 import bcrypt from 'bcryptjs'
 import multer from 'multer'
 import db, { AVATAR_DIR, DB_FILE_PATH } from './db.js'
+import { createApi } from './jellyfin-client.js'
+import {
+  getSystemApi,
+  getUserApi,
+  getItemsApi,
+  getSessionApi,
+  getUserLibraryApi,
+  getUserViewsApi,
+  getLibraryApi,
+} from '@jellyfin/sdk/lib/utils/api/index.js'
+import { BaseItemKind } from '@jellyfin/sdk/lib/generated-client/models/base-item-kind.js'
+import { ItemFields } from '@jellyfin/sdk/lib/generated-client/models/item-fields.js'
+import { ItemFilter } from '@jellyfin/sdk/lib/generated-client/models/item-filter.js'
+import { ItemSortBy } from '@jellyfin/sdk/lib/generated-client/models/item-sort-by.js'
+import { SortOrder } from '@jellyfin/sdk/lib/generated-client/models/sort-order.js'
 
 const app = express()
 const PORT = parseInt(process.env.PROXY_PORT || '3001', 10)
@@ -26,13 +41,6 @@ declare global {
     }
   }
 }
-
-// --- Helpers ---
-
-const makeHeaders = (apiKey: string) => ({
-  'X-Emby-Authorization': `MediaBrowser Client="FinScope", Device="Web", DeviceId="finscope-proxy-v1", Version="1.0.0", Token="${apiKey}"`,
-  'Content-Type': 'application/json',
-})
 
 const cleanUrl = (url: string) => url.replace(/\/$/, '')
 
@@ -66,7 +74,33 @@ function getJellyfinConfig(userId: string) {
     | undefined
 }
 
-// --- Auth Middleware ---
+function getApiForUser(userId: string) {
+  const config = getJellyfinConfig(userId)
+  if (!config) return null
+  return { api: createApi(config.server_url, config.api_key), config }
+}
+
+function jellyfinErrorStatus(err: unknown): number {
+  if (err && typeof err === 'object' && 'response' in err) {
+    const resp = (err as { response?: { status?: number } }).response
+    return resp?.status || 502
+  }
+  return 502
+}
+
+function jellyfinErrorMessage(err: unknown): string {
+  if (err && typeof err === 'object' && 'response' in err) {
+    const status = (err as { response?: { status?: number } }).response?.status
+    return `Jellyfin returned ${status}`
+  }
+  if (err instanceof Error) {
+    if (err.message === 'fetch failed' || err.message.includes('ECONNREFUSED')) {
+      return 'Cannot reach Jellyfin server — check URL'
+    }
+    return err.message
+  }
+  return 'Unknown error'
+}
 
 function requireAuth(req: Request, res: Response, next: NextFunction): void {
   const authHeader = req.headers.authorization
@@ -111,14 +145,11 @@ const upload = multer({
   },
 })
 
-// --- Setup ---
-
 app.get('/api/setup/status', (_req, res) => {
   const count = (db.prepare('SELECT COUNT(*) as cnt FROM users').get() as { cnt: number }).cnt
   res.json({ setupComplete: count > 0, hasUsers: count > 0 })
 })
 
-// --- Auth ---
 app.post('/api/auth/register', async (req, res) => {
   const { username, password } = req.body as { username?: string; password?: string }
 
@@ -371,7 +402,6 @@ app.get('/api/auth/avatar/:userId', (req, res) => {
   res.send(fs.readFileSync(filePath))
 })
 
-// --- Jellyfin Config ---
 app.post('/api/jellyfin-config', requireAuth, async (req, res) => {
   const { serverUrl, apiKey } = req.body as { serverUrl?: string; apiKey?: string }
 
@@ -383,26 +413,18 @@ app.post('/api/jellyfin-config', requireAuth, async (req, res) => {
   const baseUrl = cleanUrl(serverUrl)
 
   try {
-    const infoRes = await fetch(`${baseUrl}/System/Info`, {
-      method: 'GET',
-      headers: makeHeaders(apiKey),
-    })
-    if (!infoRes.ok) {
-      res.status(400).json({ error: `Jellyfin returned ${infoRes.status} — check URL and API key` })
-      return
+    const api = createApi(baseUrl, apiKey)
+
+    const { data: info } = await getSystemApi(api).getSystemInfo()
+
+    let jfUserId = ''
+    try {
+      const { data: jfUsers } = await getUserApi(api).getUsers()
+      const adminUser = jfUsers.find((u) => u.Policy?.IsAdministrator) || jfUsers[0]
+      jfUserId = adminUser?.Id || ''
+    } catch {
+      jfUserId = ''
     }
-
-    const info = (await infoRes.json()) as { ServerName?: string }
-
-    const usersRes = await fetch(`${baseUrl}/Users`, {
-      method: 'GET',
-      headers: makeHeaders(apiKey),
-    })
-    const jfUsers = usersRes.ok
-      ? ((await usersRes.json()) as { Id: string; Policy?: { IsAdministrator?: boolean } }[])
-      : []
-    const adminJfUser = jfUsers.find((u) => u.Policy?.IsAdministrator) || jfUsers[0]
-    const jfUserId = adminJfUser?.Id || ''
 
     db.prepare(
       `INSERT INTO jellyfin_configs (user_id, server_url, api_key, jellyfin_user_id, server_name)
@@ -424,8 +446,7 @@ app.post('/api/jellyfin-config', requireAuth, async (req, res) => {
       jellyfinUserId: jfUserId,
     })
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Connection failed'
-    res.status(502).json({ error: message === 'fetch failed' ? 'Cannot reach Jellyfin server — check URL' : message })
+    res.status(jellyfinErrorStatus(err)).json({ error: jellyfinErrorMessage(err) })
   }
 })
 
@@ -445,53 +466,245 @@ app.get('/api/jellyfin-config', requireAuth, (req, res) => {
   })
 })
 
-// --- Jellyfin Proxy ---
-
-app.get('/api/jellyfin', requireAuth, async (req, res) => {
-  const { endpoint } = req.query as Record<string, string>
-
-  if (!endpoint) {
-    res.status(400).json({ error: 'Missing endpoint' })
-    return
-  }
-
-  const config = getJellyfinConfig(req.user!.id)
-  if (!config) {
-    res.status(400).json({ error: 'No Jellyfin server configured' })
-    return
-  }
+app.get('/api/jellyfin/system-info', requireAuth, async (req, res) => {
+  const ctx = getApiForUser(req.user!.id)
+  if (!ctx) { res.status(400).json({ error: 'No Jellyfin server configured' }); return }
 
   try {
-    const url = `${config.server_url}${endpoint}`
-    const response = await fetch(url, {
-      method: 'GET',
-      headers: makeHeaders(config.api_key),
-    })
-
-    if (!response.ok) {
-      res.status(response.status).json({ error: `Jellyfin returned ${response.status}` })
-      return
-    }
-
-    const data = await response.json()
+    const { data } = await getSystemApi(ctx.api).getSystemInfo()
     res.json(data)
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Unknown error'
-    res.status(502).json({ error: `Proxy error: ${message}` })
+    res.status(jellyfinErrorStatus(err)).json({ error: jellyfinErrorMessage(err) })
   }
 })
 
-// --- History Sync ---
+app.get('/api/jellyfin/sessions', requireAuth, async (req, res) => {
+  const ctx = getApiForUser(req.user!.id)
+  if (!ctx) { res.status(400).json({ error: 'No Jellyfin server configured' }); return }
+
+  try {
+    const { data } = await getSessionApi(ctx.api).getSessions()
+    res.json(data)
+  } catch (err) {
+    res.status(jellyfinErrorStatus(err)).json({ error: jellyfinErrorMessage(err) })
+  }
+})
+
+app.get('/api/jellyfin/users', requireAuth, async (req, res) => {
+  const ctx = getApiForUser(req.user!.id)
+  if (!ctx) { res.status(400).json({ error: 'No Jellyfin server configured' }); return }
+
+  try {
+    const { data } = await getUserApi(ctx.api).getUsers()
+    res.json(data)
+  } catch (err) {
+    res.status(jellyfinErrorStatus(err)).json({ error: jellyfinErrorMessage(err) })
+  }
+})
+
+app.get('/api/jellyfin/users/:userId/history', requireAuth, async (req, res) => {
+  const ctx = getApiForUser(req.user!.id)
+  if (!ctx) { res.status(400).json({ error: 'No Jellyfin server configured' }); return }
+
+  const { userId } = req.params
+  const limit = parseInt(req.query.limit as string) || 3
+
+  try {
+    const { data } = await getItemsApi(ctx.api).getItems({
+      userId,
+      sortBy: [ItemSortBy.DatePlayed],
+      sortOrder: [SortOrder.Descending],
+      filters: [ItemFilter.IsPlayed],
+      limit,
+      recursive: true,
+      enableUserData: true,
+    })
+    res.json(data.Items || [])
+  } catch (err) {
+    res.status(jellyfinErrorStatus(err)).json({ error: jellyfinErrorMessage(err) })
+  }
+})
+
+app.get('/api/jellyfin/users/:userId/play-count', requireAuth, async (req, res) => {
+  const ctx = getApiForUser(req.user!.id)
+  if (!ctx) { res.status(400).json({ error: 'No Jellyfin server configured' }); return }
+
+  const { userId } = req.params
+
+  try {
+    const { data } = await getItemsApi(ctx.api).getItems({
+      userId,
+      filters: [ItemFilter.IsPlayed],
+      recursive: true,
+      limit: 0,
+    })
+    res.json({ TotalRecordCount: data.TotalRecordCount || 0 })
+  } catch (err) {
+    res.status(jellyfinErrorStatus(err)).json({ error: jellyfinErrorMessage(err) })
+  }
+})
+
+app.get('/api/jellyfin/item-counts', requireAuth, async (req, res) => {
+  const ctx = getApiForUser(req.user!.id)
+  if (!ctx) { res.status(400).json({ error: 'No Jellyfin server configured' }); return }
+
+  try {
+    const { data } = await getLibraryApi(ctx.api).getItemCounts()
+    res.json(data)
+  } catch (err) {
+    res.status(jellyfinErrorStatus(err)).json({ error: jellyfinErrorMessage(err) })
+  }
+})
+
+app.get('/api/jellyfin/users/:userId/most-played', requireAuth, async (req, res) => {
+  const ctx = getApiForUser(req.user!.id)
+  if (!ctx) { res.status(400).json({ error: 'No Jellyfin server configured' }); return }
+
+  const { userId } = req.params
+  const limit = parseInt(req.query.limit as string) || 5
+
+  try {
+    const { data } = await getItemsApi(ctx.api).getItems({
+      userId,
+      sortBy: [ItemSortBy.PlayCount],
+      sortOrder: [SortOrder.Descending],
+      filters: [ItemFilter.IsPlayed],
+      limit,
+      recursive: true,
+      includeItemTypes: [BaseItemKind.Movie, BaseItemKind.Series, BaseItemKind.Audio],
+      enableUserData: true,
+    })
+    res.json(data.Items || [])
+  } catch (err) {
+    res.status(jellyfinErrorStatus(err)).json({ error: jellyfinErrorMessage(err) })
+  }
+})
+
+app.get('/api/jellyfin/users/:userId/latest', requireAuth, async (req, res) => {
+  const ctx = getApiForUser(req.user!.id)
+  if (!ctx) { res.status(400).json({ error: 'No Jellyfin server configured' }); return }
+
+  const { userId } = req.params
+  const limit = parseInt(req.query.limit as string) || 10
+
+  try {
+    const { data } = await getUserLibraryApi(ctx.api).getLatestMedia({
+      userId,
+      limit,
+      fields: [ItemFields.PrimaryImageAspectRatio, ItemFields.Overview],
+    })
+    res.json(data)
+  } catch (err) {
+    res.status(jellyfinErrorStatus(err)).json({ error: jellyfinErrorMessage(err) })
+  }
+})
+
+app.get('/api/jellyfin/users/:userId/libraries', requireAuth, async (req, res) => {
+  const ctx = getApiForUser(req.user!.id)
+  if (!ctx) { res.status(400).json({ error: 'No Jellyfin server configured' }); return }
+
+  const { userId } = req.params
+
+  try {
+    const { data } = await getUserViewsApi(ctx.api).getUserViews({ userId })
+    res.json(data.Items || [])
+  } catch (err) {
+    res.status(jellyfinErrorStatus(err)).json({ error: jellyfinErrorMessage(err) })
+  }
+})
+
+app.get('/api/jellyfin/users/:userId/items/:itemId', requireAuth, async (req, res) => {
+  const ctx = getApiForUser(req.user!.id)
+  if (!ctx) { res.status(400).json({ error: 'No Jellyfin server configured' }); return }
+
+  const { userId, itemId } = req.params
+
+  try {
+    const { data } = await getUserLibraryApi(ctx.api).getItem({
+      itemId,
+      userId,
+    })
+    res.json(data)
+  } catch (err) {
+    res.status(jellyfinErrorStatus(err)).json({ error: jellyfinErrorMessage(err) })
+  }
+})
+
+app.get('/api/jellyfin/users/:userId/hero-items', requireAuth, async (req, res) => {
+  const ctx = getApiForUser(req.user!.id)
+  if (!ctx) { res.status(400).json({ error: 'No Jellyfin server configured' }); return }
+
+  const { userId } = req.params
+
+  try {
+    const { data } = await getItemsApi(ctx.api).getItems({
+      userId,
+      sortBy: [ItemSortBy.Random],
+      limit: 10,
+      recursive: true,
+      includeItemTypes: [BaseItemKind.Movie, BaseItemKind.Series],
+      fields: [ItemFields.Overview],
+    })
+    res.json(data.Items || [])
+  } catch (err) {
+    res.status(jellyfinErrorStatus(err)).json({ error: jellyfinErrorMessage(err) })
+  }
+})
+
+app.get('/api/jellyfin/users/:userId/artist-albums', requireAuth, async (req, res) => {
+  const ctx = getApiForUser(req.user!.id)
+  if (!ctx) { res.status(400).json({ error: 'No Jellyfin server configured' }); return }
+
+  const { userId } = req.params
+  const artistId = req.query.artistId as string
+
+  if (!artistId) { res.status(400).json({ error: 'Missing artistId' }); return }
+
+  try {
+    const { data } = await getItemsApi(ctx.api).getItems({
+      userId,
+      artistIds: [artistId],
+      includeItemTypes: [BaseItemKind.MusicAlbum],
+      recursive: true,
+      sortBy: [ItemSortBy.ProductionYear, ItemSortBy.SortName],
+      sortOrder: [SortOrder.Descending],
+      fields: [ItemFields.Overview, ItemFields.Genres],
+    })
+    res.json(data.Items || [])
+  } catch (err) {
+    res.status(jellyfinErrorStatus(err)).json({ error: jellyfinErrorMessage(err) })
+  }
+})
+
+app.get('/api/jellyfin/users/:userId/album-tracks', requireAuth, async (req, res) => {
+  const ctx = getApiForUser(req.user!.id)
+  if (!ctx) { res.status(400).json({ error: 'No Jellyfin server configured' }); return }
+
+  const { userId } = req.params
+  const albumId = req.query.albumId as string
+
+  if (!albumId) { res.status(400).json({ error: 'Missing albumId' }); return }
+
+  try {
+    const { data } = await getItemsApi(ctx.api).getItems({
+      userId,
+      parentId: albumId,
+      sortBy: [ItemSortBy.ParentIndexNumber, ItemSortBy.IndexNumber],
+    })
+    res.json(data.Items || [])
+  } catch (err) {
+    res.status(jellyfinErrorStatus(err)).json({ error: jellyfinErrorMessage(err) })
+  }
+})
 
 app.post('/api/history/sync', requireAuth, async (req, res) => {
-  const config = getJellyfinConfig(req.user!.id)
-  if (!config) {
+  const ctx = getApiForUser(req.user!.id)
+  if (!ctx) {
     res.status(400).json({ error: 'No Jellyfin server configured' })
     return
   }
 
-  const baseUrl = config.server_url
-  const headers = makeHeaders(config.api_key)
+  const baseUrl = ctx.config.server_url
   const forceFullSync = req.query.force === 'true'
 
   if (forceFullSync) {
@@ -503,17 +716,16 @@ app.post('/api/history/sync', requireAuth, async (req, res) => {
     VALUES (?, ?, ?, ?, ?, ?)
   `)
 
-  let jfUsers: { Id: string; Name: string }[] = []
+  interface JfUser { Id: string; Name: string }
+  let jfUsers: JfUser[] = []
   try {
-    const usersRes = await fetch(`${baseUrl}/Users`, { method: 'GET', headers })
-    if (usersRes.ok) {
-      jfUsers = (await usersRes.json()) as { Id: string; Name: string }[]
-    }
+    const { data } = await getUserApi(ctx.api).getUsers()
+    jfUsers = data.map((u) => ({ Id: u.Id || '', Name: u.Name || '' })).filter((u) => u.Id)
   } catch {
-    // Fall back to configured user only
+    jfUsers = []
   }
   if (jfUsers.length === 0) {
-    jfUsers = [{ Id: config.jellyfin_user_id, Name: 'Admin' }]
+    jfUsers = [{ Id: ctx.config.jellyfin_user_id, Name: 'Admin' }]
   }
 
   const BATCH_SIZE = 500
@@ -533,19 +745,23 @@ app.post('/api/history/sync', requireAuth, async (req, res) => {
       let maxDatePlayed: string | null = null
 
       while (!done) {
-        const endpoint = `/Users/${userId}/Items?SortBy=DatePlayed&SortOrder=Descending&Filters=IsPlayed&IncludeItemTypes=Movie,Episode,Audio,MusicAlbum&Limit=${BATCH_SIZE}&StartIndex=${startIndex}&Fields=DatePlayed&Recursive=true`
-        const url = `${baseUrl}${endpoint}`
-        const response = await fetch(url, { method: 'GET', headers })
+        const { data } = await getItemsApi(ctx.api).getItems({
+          userId,
+          sortBy: [ItemSortBy.DatePlayed],
+          sortOrder: [SortOrder.Descending],
+          filters: [ItemFilter.IsPlayed],
+          includeItemTypes: [
+            BaseItemKind.Movie,
+            BaseItemKind.Episode,
+            BaseItemKind.Audio,
+            BaseItemKind.MusicAlbum,
+          ],
+          limit: BATCH_SIZE,
+          startIndex,
+          recursive: true,
+          enableUserData: true,
+        })
 
-        if (!response.ok) {
-          console.error(`[HistorySync] Jellyfin returned ${response.status} for user ${jfUser.Name}`)
-          break
-        }
-
-        const data = (await response.json()) as {
-          Items?: { Id: string; Name: string; Type: string; DatePlayed?: string }[]
-          TotalRecordCount?: number
-        }
         const items = data.Items || []
 
         if (startIndex === 0) {
@@ -555,12 +771,12 @@ app.post('/api/history/sync', requireAuth, async (req, res) => {
         if (items.length === 0) break
 
         const insertBatch = db.transaction(
-          (batch: { Id: string; Name: string; Type: string; DatePlayed?: string }[]) => {
+          (batch: typeof items) => {
             for (const item of batch) {
-              const datePlayed = item.DatePlayed || new Date().toISOString()
+              const datePlayed = item.UserData?.LastPlayedDate || new Date().toISOString()
 
               if (meta?.last_sync && datePlayed <= meta.last_sync) {
-                if (item.DatePlayed) {
+                if (item.UserData?.LastPlayedDate) {
                   done = true
                   break
                 }
@@ -603,12 +819,9 @@ app.post('/api/history/sync', requireAuth, async (req, res) => {
 
     res.json({ success: true, newEntries: grandTotalInserted, totalEntries: total, usersSynced: jfUsers.length })
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Unknown error'
-    res.status(502).json({ error: `Sync error: ${message}` })
+    res.status(502).json({ error: `Sync error: ${jellyfinErrorMessage(err)}` })
   }
 })
-
-// --- Live Session Tracking ---
 
 app.post('/api/history/track-sessions', requireAuth, (req, res) => {
   const config = getJellyfinConfig(req.user!.id)
@@ -637,7 +850,7 @@ app.post('/api/history/track-sessions', requireAuth, (req, res) => {
   const now = new Date().toISOString()
   const hourKey = now.slice(0, 13) + ':00:00.000Z'
 
-  const insert = db.prepare(`
+  const insertStmt = db.prepare(`
     INSERT OR IGNORE INTO playback_history (server_url, user_id, item_id, item_name, item_type, date_played)
     VALUES (?, ?, ?, ?, ?, ?)
   `)
@@ -646,7 +859,7 @@ app.post('/api/history/track-sessions', requireAuth, (req, res) => {
   const insertBatch = db.transaction(() => {
     for (const s of sessions) {
       try {
-        insert.run(baseUrl, s.userId, s.itemId, s.itemName, s.itemType, hourKey)
+        insertStmt.run(baseUrl, s.userId, s.itemId, s.itemName, s.itemType, hourKey)
         tracked++
       } catch {
         // duplicate
@@ -662,8 +875,6 @@ app.post('/api/history/track-sessions', requireAuth, (req, res) => {
 
   res.json({ tracked })
 })
-
-// --- Analytics ---
 
 app.get('/api/history/analytics', requireAuth, (req, res) => {
   const config = getJellyfinConfig(req.user!.id)
@@ -701,8 +912,6 @@ app.get('/api/history/analytics', requireAuth, (req, res) => {
   console.log(`[Analytics] ${rows.length} total rows, ${Object.keys(historyMap).length} days, ${parseErrors} parse errors`)
   res.json({ historyMap, peakHours, totalPlays: rows.length })
 })
-
-// --- Image Proxies (token via query param for <img> tags) ---
 
 function resolveImageAuth(req: Request): string | null {
   const authHeader = req.headers.authorization
@@ -777,8 +986,6 @@ app.get('/api/jellyfin/user-image', async (req, res) => {
   }
 })
 
-// --- Pulse Stats ---
-
 app.get('/api/pulse-stats', requireAuth, (req, res) => {
   const config = getJellyfinConfig(req.user!.id)
 
@@ -809,31 +1016,21 @@ app.get('/api/pulse-stats', requireAuth, (req, res) => {
   res.json({ dbSizeBytes, totalHistoryEntries, lastSyncTime })
 })
 
-// --- Genres ---
-
 app.get('/api/genres', requireAuth, async (req, res) => {
-  const config = getJellyfinConfig(req.user!.id)
-  if (!config) {
+  const ctx = getApiForUser(req.user!.id)
+  if (!ctx) {
     res.json({ genres: [] })
     return
   }
 
   try {
-    const endpoint = `/Users/${config.jellyfin_user_id}/Items?Recursive=true&IncludeItemTypes=Movie,Series&Fields=Genres&Limit=2000`
-    const url = `${config.server_url}${endpoint}`
-    const response = await fetch(url, {
-      method: 'GET',
-      headers: makeHeaders(config.api_key),
+    const { data } = await getItemsApi(ctx.api).getItems({
+      userId: ctx.config.jellyfin_user_id,
+      recursive: true,
+      includeItemTypes: [BaseItemKind.Movie, BaseItemKind.Series],
+      fields: [ItemFields.Genres],
+      limit: 2000,
     })
-
-    if (!response.ok) {
-      res.json({ genres: [] })
-      return
-    }
-
-    const data = (await response.json()) as {
-      Items?: { Genres?: string[] }[]
-    }
 
     const genreMap: Record<string, number> = {}
     let totalItems = 0

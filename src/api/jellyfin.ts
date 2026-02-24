@@ -7,18 +7,9 @@ const getAuthHeaders = (): Record<string, string> => {
   return token ? { Authorization: `Bearer ${token}` } : {}
 }
 
-// _url and _apiKey kept for compat but proxy reads creds from DB now
-const proxyFetch = async <T>(
-  endpoint: string,
-  _url: string,
-  _apiKey: string,
-  fallback: T,
-): Promise<T> => {
+const authFetch = async <T>(url: string, fallback: T): Promise<T> => {
   try {
-    const params = new URLSearchParams({ endpoint })
-    const response = await fetch(`/api/jellyfin?${params}`, {
-      headers: getAuthHeaders(),
-    })
+    const response = await fetch(url, { headers: getAuthHeaders() })
     if (!response.ok) return fallback
     return await response.json()
   } catch {
@@ -27,35 +18,26 @@ const proxyFetch = async <T>(
 }
 
 export const JellyfinAPI = {
-  connect: (url: string, apiKey: string): Promise<ServerInfo> =>
-    proxyFetch<ServerInfo>('/System/Info', url, apiKey, null as unknown as ServerInfo).then(
-      (data) => {
-        if (!data) throw new Error('Connection failed')
-        return data
-      },
-    ),
+  connect: (_url: string, _apiKey: string): Promise<ServerInfo> =>
+    authFetch<ServerInfo | null>('/api/jellyfin/system-info', null).then((data) => {
+      if (!data) throw new Error('Connection failed')
+      return data
+    }),
 
-  getSessions: (url: string, apiKey: string): Promise<Session[]> =>
-    proxyFetch<Session[]>('/Sessions', url, apiKey, []).then((sessions) =>
+  getSessions: (_url: string, _apiKey: string): Promise<Session[]> =>
+    authFetch<Session[]>('/api/jellyfin/sessions', []).then((sessions) =>
       sessions.filter((s) => s.NowPlayingItem != null),
     ),
 
-  getUsers: (url: string, apiKey: string): Promise<JellyfinUser[]> =>
-    proxyFetch<JellyfinUser[]>('/Users', url, apiKey, []),
+  getUsers: (_url: string, _apiKey: string): Promise<JellyfinUser[]> =>
+    authFetch<JellyfinUser[]>('/api/jellyfin/users', []),
 
-  getUserHistory: (url: string, apiKey: string, userId: string): Promise<NowPlayingItem[]> =>
-    proxyFetch<{ Items?: NowPlayingItem[] }>(
-      `/Users/${userId}/Items?SortBy=DatePlayed&SortOrder=Descending&Filters=IsPlayed&Limit=3`,
-      url,
-      apiKey,
-      { Items: [] },
-    ).then((data) => data.Items || []),
+  getUserHistory: (_url: string, _apiKey: string, userId: string): Promise<NowPlayingItem[]> =>
+    authFetch<NowPlayingItem[]>(`/api/jellyfin/users/${userId}/history?limit=3`, []),
 
-  getUserStats: (url: string, apiKey: string, userId: string): Promise<{ playCount: number }> =>
-    proxyFetch<{ TotalRecordCount?: number }>(
-      `/Users/${userId}/Items?Filters=IsPlayed&Recursive=true&Limit=1`,
-      url,
-      apiKey,
+  getUserStats: (_url: string, _apiKey: string, userId: string): Promise<{ playCount: number }> =>
+    authFetch<{ TotalRecordCount?: number }>(
+      `/api/jellyfin/users/${userId}/play-count`,
       { TotalRecordCount: 0 },
     ).then((data) => ({ playCount: data.TotalRecordCount || 0 })),
 
@@ -110,45 +92,25 @@ export const JellyfinAPI = {
     }
   },
 
-  getCounts: (url: string, apiKey: string): Promise<ItemCounts | null> =>
-    proxyFetch<ItemCounts | null>('/Items/Counts', url, apiKey, null),
+  getCounts: (_url: string, _apiKey: string): Promise<ItemCounts | null> =>
+    authFetch<ItemCounts | null>('/api/jellyfin/item-counts', null),
 
-  getMostPlayed: (url: string, apiKey: string, userId: string): Promise<NowPlayingItem[]> =>
-    proxyFetch<{ Items?: NowPlayingItem[] }>(
-      `/Users/${userId}/Items?SortBy=PlayCount&SortOrder=Descending&Filters=IsPlayed&Limit=5&Recursive=true&IncludeItemTypes=Movie,Series,Audio&Fields=PlayCount`,
-      url,
-      apiKey,
-      { Items: [] },
-    ).then((data) => data.Items || []),
+  getMostPlayed: (_url: string, _apiKey: string, userId: string): Promise<NowPlayingItem[]> =>
+    authFetch<NowPlayingItem[]>(`/api/jellyfin/users/${userId}/most-played?limit=5`, []),
 
-  getLatestItems: (url: string, apiKey: string, userId: string): Promise<NowPlayingItem[]> =>
-    proxyFetch<NowPlayingItem[]>(
-      `/Users/${userId}/Items/Latest?Limit=10&Fields=PrimaryImageAspectRatio,Overview`,
-      url,
-      apiKey,
-      [],
-    ),
+  getLatestItems: (_url: string, _apiKey: string, userId: string): Promise<NowPlayingItem[]> =>
+    authFetch<NowPlayingItem[]>(`/api/jellyfin/users/${userId}/latest?limit=10`, []),
 
-  getLibraries: (url: string, apiKey: string, userId: string): Promise<LibraryFolder[]> =>
-    proxyFetch<{ Items?: LibraryFolder[] }>(
-      `/Users/${userId}/Views`,
-      url,
-      apiKey,
-      { Items: [] },
-    ).then((data) => data.Items || []),
+  getLibraries: (_url: string, _apiKey: string, userId: string): Promise<LibraryFolder[]> =>
+    authFetch<LibraryFolder[]>(`/api/jellyfin/users/${userId}/libraries`, []),
 
   getItemDetail: (
-    url: string,
-    apiKey: string,
+    _url: string,
+    _apiKey: string,
     userId: string,
     itemId: string,
   ): Promise<ItemDetail | null> =>
-    proxyFetch<ItemDetail | null>(
-      `/Users/${userId}/Items/${itemId}?Fields=Overview,Genres,People,Studios,OfficialRating,CommunityRating,RunTimeTicks,Artists,ArtistItems,Album,AlbumId,IndexNumber,ParentIndexNumber,ChildCount`,
-      url,
-      apiKey,
-      null,
-    ),
+    authFetch<ItemDetail | null>(`/api/jellyfin/users/${userId}/items/${itemId}`, null),
 
   getItemImageUrl: (_serverUrl: string, itemId: string, type = 'Primary'): string => {
     const token = getToken()
@@ -165,13 +127,8 @@ export const JellyfinAPI = {
     return `/api/jellyfin/user-image?userId=${encodeURIComponent(userId)}${token ? `&token=${token}` : ''}`
   },
 
-  getRandomHeroItems: (url: string, apiKey: string, userId: string): Promise<NowPlayingItem[]> =>
-    proxyFetch<{ Items?: NowPlayingItem[] }>(
-      `/Users/${userId}/Items?SortBy=Random&Limit=10&Recursive=true&IncludeItemTypes=Movie,Series&Fields=Overview,ParentBackdropItemId,ParentLogoItemId`,
-      url,
-      apiKey,
-      { Items: [] },
-    ).then((data) => data.Items || []),
+  getRandomHeroItems: (_url: string, _apiKey: string, userId: string): Promise<NowPlayingItem[]> =>
+    authFetch<NowPlayingItem[]>(`/api/jellyfin/users/${userId}/hero-items`, []),
 
   getPulseStats: async (): Promise<{
     dbSizeBytes: number
@@ -203,28 +160,24 @@ export const JellyfinAPI = {
   },
 
   getArtistAlbums: (
-    url: string,
-    apiKey: string,
+    _url: string,
+    _apiKey: string,
     userId: string,
     artistId: string,
   ): Promise<NowPlayingItem[]> =>
-    proxyFetch<{ Items?: NowPlayingItem[] }>(
-      `/Users/${userId}/Items?ArtistIds=${artistId}&IncludeItemTypes=MusicAlbum&Recursive=true&SortBy=ProductionYear,SortName&SortOrder=Descending&Fields=Overview,Genres,ProductionYear`,
-      url,
-      apiKey,
-      { Items: [] },
-    ).then((data) => data.Items || []),
+    authFetch<NowPlayingItem[]>(
+      `/api/jellyfin/users/${userId}/artist-albums?artistId=${encodeURIComponent(artistId)}`,
+      [],
+    ),
 
   getAlbumTracks: (
-    url: string,
-    apiKey: string,
+    _url: string,
+    _apiKey: string,
     userId: string,
     albumId: string,
   ): Promise<AlbumTrack[]> =>
-    proxyFetch<{ Items?: AlbumTrack[] }>(
-      `/Users/${userId}/Items?ParentId=${albumId}&SortBy=ParentIndexNumber,IndexNumber&Fields=Artists,ArtistItems,RunTimeTicks`,
-      url,
-      apiKey,
-      { Items: [] },
-    ).then((data) => data.Items || []),
+    authFetch<AlbumTrack[]>(
+      `/api/jellyfin/users/${userId}/album-tracks?albumId=${encodeURIComponent(albumId)}`,
+      [],
+    ),
 }

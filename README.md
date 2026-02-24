@@ -12,6 +12,26 @@
 
 A monitoring and analytics dashboard for Jellyfin. Keep an eye on active streams, user activity, library stats, and server health -- all in one place, with a glass-morphism UI inspired by Apple's Spatial Design.
 
+## Screenshots
+
+### Dashboard Overview
+
+Live session monitoring with real-time stream cards — cover art, playback status, codec details and progress at a glance.
+
+![Dashboard Overview](Screenshots/dashboard-overview.png)
+
+### Deep Analytics
+
+Server activity heatmap, prime-time analysis, storage matrix and playback history — aggregated into a local SQLite database.
+
+![Deep Analytics](Screenshots/deep-analytics.png)
+
+### System Pulse
+
+Server info, live network traffic, transcoding overview with active codecs, and database health.
+
+![System Pulse](Screenshots/system-pulse.png)
+
 ## Features
 
 - **Live Stream Radar** -- Real-time view of active sessions with playback progress, codec details, and transcoding status
@@ -45,7 +65,7 @@ A monitoring and analytics dashboard for Jellyfin. Keep an eye on active streams
 1. Clone the repository:
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/finscope.git
+git clone https://github.com/netz-sg/finscope.git
 cd finscope
 ```
 

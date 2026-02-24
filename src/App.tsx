@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { useAppStore } from './store/useAppStore'
+import { useUIStore } from './store/useUIStore'
 import { useJellyfinPolling } from './hooks/useJellyfinPolling'
 import { useTickTimer } from './hooks/useTickTimer'
 import { useHeroRotation } from './hooks/useHeroRotation'
@@ -65,6 +66,7 @@ function Dashboard() {
 
 function AppRouter() {
   const { phase, initialize } = useAppStore()
+  const showOnboardingTour = useUIStore((s) => s.showOnboardingTour)
 
   useEffect(() => {
     initialize()
@@ -73,6 +75,8 @@ function AppRouter() {
   if (phase === 'loading') return <LoadingScreen />
   if (phase === 'onboarding') return <OnboardingScreen />
   if (phase === 'login') return <LoginScreen />
+
+  if (showOnboardingTour) return <OnboardingScreen isRerun />
 
   return <Dashboard />
 }

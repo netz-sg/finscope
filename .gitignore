@@ -14,6 +14,11 @@ dist-ssr
 .env
 proxy/dist
 proxy/node_modules
+proxy/data
+data/
+*.db
+*.db-wal
+*.db-shm
 temp-init
 
 # Internal docs & config

@@ -2,5 +2,13 @@ node_modules
 proxy/node_modules
 dist
 proxy/dist
+proxy/data
+data/
+*.db
+*.db-wal
+*.db-shm
 .git
 *.md
+.claude/
+Infos/
+.env

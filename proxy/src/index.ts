@@ -581,32 +581,50 @@ app.post('/api/history/sync', requireAuth, async (req, res) => {
       let maxDatePlayed: string | null = null
 
       while (!done) {
-        const endpoint = `/Users/${userId}/Items?SortBy=DatePlayed&SortOrder=Descending&Filters=IsPlayed&Limit=${BATCH_SIZE}&StartIndex=${startIndex}&Fields=DatePlayed`
+        // Use Filters=IsPlayed AND also request items with DatePlayed populated
+        // Some Jellyfin versions don't populate DatePlayed with IsPlayed filter alone
+        const endpoint = `/Users/${userId}/Items?SortBy=DatePlayed&SortOrder=Descending&Filters=IsPlayed&IncludeItemTypes=Movie,Episode,Audio,MusicAlbum&Limit=${BATCH_SIZE}&StartIndex=${startIndex}&Fields=DatePlayed&Recursive=true`
         const url = `${baseUrl}${endpoint}`
         const response = await fetch(url, { method: 'GET', headers })
 
-        if (!response.ok) break
+        if (!response.ok) {
+          console.error(`[HistorySync] Jellyfin returned ${response.status} for user ${jfUser.Name}`)
+          break
+        }
 
         const data = (await response.json()) as {
           Items?: { Id: string; Name: string; Type: string; DatePlayed?: string }[]
+          TotalRecordCount?: number
         }
         const items = data.Items || []
+
+        if (startIndex === 0) {
+          console.log(`[HistorySync] User ${jfUser.Name}: ${data.TotalRecordCount ?? items.length} played items found`)
+        }
+
         if (items.length === 0) break
 
         const insertBatch = db.transaction(
           (batch: { Id: string; Name: string; Type: string; DatePlayed?: string }[]) => {
             for (const item of batch) {
-              if (!item.DatePlayed) continue
+              // Use DatePlayed if available, otherwise fall back to current time
+              // Many Jellyfin versions return IsPlayed items WITHOUT DatePlayed
+              const datePlayed = item.DatePlayed || new Date().toISOString()
+
               // Only skip if we already synced past this point (incremental sync)
-              if (meta?.last_sync && item.DatePlayed <= meta.last_sync) {
-                done = true
-                break
+              if (meta?.last_sync && datePlayed <= meta.last_sync) {
+                // Only stop pagination if we have a real DatePlayed (DESC order)
+                if (item.DatePlayed) {
+                  done = true
+                  break
+                }
+                continue
               }
-              insert.run(baseUrl, userId, item.Id, item.Name, item.Type, item.DatePlayed)
+              insert.run(baseUrl, userId, item.Id, item.Name, item.Type, datePlayed)
               userInserted++
               // Track the newest item date (first item in DESC order is newest)
-              if (!maxDatePlayed || item.DatePlayed > maxDatePlayed) {
-                maxDatePlayed = item.DatePlayed
+              if (!maxDatePlayed || datePlayed > maxDatePlayed) {
+                maxDatePlayed = datePlayed
               }
             }
           },
@@ -616,6 +634,8 @@ app.post('/api/history/sync', requireAuth, async (req, res) => {
         if (items.length < BATCH_SIZE) break
         startIndex += BATCH_SIZE
       }
+
+      console.log(`[HistorySync] User ${jfUser.Name}: ${userInserted} new entries synced`)
 
       grandTotalInserted += userInserted
 
@@ -645,12 +665,73 @@ app.post('/api/history/sync', requireAuth, async (req, res) => {
 })
 
 /* ================================================================ */
+/*  LIVE SESSION TRACKING                                            */
+/*  Records active sessions as playback events — more reliable than  */
+/*  Jellyfin's IsPlayed history for analytics.                       */
+/* ================================================================ */
+
+app.post('/api/history/track-sessions', requireAuth, (req, res) => {
+  const config = getJellyfinConfig(req.user!.id)
+  if (!config) {
+    res.status(400).json({ error: 'No Jellyfin server configured' })
+    return
+  }
+
+  const { sessions } = req.body as {
+    sessions?: {
+      userId: string
+      userName: string
+      itemId: string
+      itemName: string
+      itemType: string
+      client: string
+    }[]
+  }
+
+  if (!sessions || sessions.length === 0) {
+    res.json({ tracked: 0 })
+    return
+  }
+
+  const baseUrl = config.server_url
+  const now = new Date().toISOString()
+  // Round to the nearest hour so we don't duplicate entries for the same session within the same hour
+  const hourKey = now.slice(0, 13) + ':00:00.000Z'
+
+  const insert = db.prepare(`
+    INSERT OR IGNORE INTO playback_history (server_url, user_id, item_id, item_name, item_type, date_played)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `)
+
+  let tracked = 0
+  const insertBatch = db.transaction(() => {
+    for (const s of sessions) {
+      try {
+        insert.run(baseUrl, s.userId, s.itemId, s.itemName, s.itemType, hourKey)
+        tracked++
+      } catch {
+        // UNIQUE constraint = already tracked this hour
+      }
+    }
+  })
+
+  insertBatch()
+
+  if (tracked > 0) {
+    console.log(`[SessionTrack] Recorded ${tracked} playback events`)
+  }
+
+  res.json({ tracked })
+})
+
+/* ================================================================ */
 /*  ANALYTICS (now with auth + DB lookup)                            */
 /* ================================================================ */
 
 app.get('/api/history/analytics', requireAuth, (req, res) => {
   const config = getJellyfinConfig(req.user!.id)
   if (!config) {
+    console.log('[Analytics] No Jellyfin config found for user')
     res.json({ historyMap: {}, peakHours: Array(24).fill(0), totalPlays: 0 })
     return
   }
@@ -668,14 +749,20 @@ app.get('/api/history/analytics', requireAuth, (req, res) => {
 
   const historyMap: Record<string, number> = {}
   const peakHours = Array(24).fill(0) as number[]
+  let parseErrors = 0
 
   for (const row of rows) {
     const d = new Date(row.date_played)
+    if (isNaN(d.getTime())) {
+      parseErrors++
+      continue
+    }
     const dateKey = d.toISOString().split('T')[0]
     historyMap[dateKey] = (historyMap[dateKey] || 0) + 1
     peakHours[d.getHours()] += 1
   }
 
+  console.log(`[Analytics] ${rows.length} total rows, ${Object.keys(historyMap).length} days, ${parseErrors} parse errors`)
   res.json({ historyMap, peakHours, totalPlays: rows.length })
 })
 

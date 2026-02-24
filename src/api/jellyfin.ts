@@ -70,9 +70,13 @@ export const JellyfinAPI = {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
       })
-      if (!response.ok) return { newEntries: 0, totalEntries: 0 }
+      if (!response.ok) {
+        console.warn(`[syncHistory] HTTP ${response.status}: ${await response.text().catch(() => 'no body')}`)
+        return { newEntries: 0, totalEntries: 0 }
+      }
       return await response.json()
-    } catch {
+    } catch (err) {
+      console.warn('[syncHistory] Fetch failed:', err)
       return { newEntries: 0, totalEntries: 0 }
     }
   },
@@ -87,10 +91,28 @@ export const JellyfinAPI = {
       const response = await fetch('/api/history/analytics', {
         headers: getAuthHeaders(),
       })
-      if (!response.ok) return { historyMap: {}, peakHours: Array(24).fill(0), totalPlays: 0 }
+      if (!response.ok) {
+        console.warn(`[getStoredAnalytics] HTTP ${response.status}`)
+        return { historyMap: {}, peakHours: Array(24).fill(0), totalPlays: 0 }
+      }
       return await response.json()
-    } catch {
+    } catch (err) {
+      console.warn('[getStoredAnalytics] Fetch failed:', err)
       return { historyMap: {}, peakHours: Array(24).fill(0), totalPlays: 0 }
+    }
+  },
+
+  /** Track active sessions as playback events (called every poll cycle) */
+  trackSessions: async (sessions: { userId: string; userName: string; itemId: string; itemName: string; itemType: string; client: string }[]): Promise<void> => {
+    if (sessions.length === 0) return
+    try {
+      await fetch('/api/history/track-sessions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+        body: JSON.stringify({ sessions }),
+      })
+    } catch {
+      // Silent — don't disrupt polling
     }
   },
 

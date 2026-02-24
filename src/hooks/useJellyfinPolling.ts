@@ -48,6 +48,7 @@ export const useJellyfinPolling = () => {
   const heroFetched = useRef(false)
   const extraDataFetched = useRef(false)
   const serverInfoFetched = useRef(false)
+  const analyticsRefreshCounter = useRef(0)
   const dbAnalytics = useRef<{ historyMap: Record<string, number>; peakHours: number[] } | null>(
     null,
   )
@@ -109,8 +110,39 @@ export const useJellyfinPolling = () => {
             if (s.Client) clients[s.Client] = (clients[s.Client] || 0) + 1
           })
 
-          // Merge DB analytics (historyMap/peakHours) with live client data
-          if (dbAnalytics.current) {
+          // Track active sessions as playback history (live capture)
+          if (activeSessions.length > 0) {
+            const trackable = activeSessions
+              .filter((s) => s.NowPlayingItem && !s.PlayState.IsPaused)
+              .map((s) => ({
+                userId: s.UserId,
+                userName: s.UserName,
+                itemId: s.NowPlayingItem.Id,
+                itemName: s.NowPlayingItem.Name,
+                itemType: s.NowPlayingItem.Type,
+                client: s.Client || s.DeviceName,
+              }))
+            JellyfinAPI.trackSessions(trackable)
+          }
+
+          // Periodically refresh analytics from DB (every ~60s = 6 poll cycles)
+          // This picks up new data from live session tracking
+          analyticsRefreshCounter.current++
+          if (dbAnalytics.current && analyticsRefreshCounter.current % 6 === 0) {
+            JellyfinAPI.getStoredAnalytics()
+              .then((analytics) => {
+                if (analytics.totalPlays > 0) {
+                  dbAnalytics.current = {
+                    historyMap: analytics.historyMap,
+                    peakHours: analytics.peakHours,
+                  }
+                  console.log(`[FinScope] Analytics refreshed: ${analytics.totalPlays} plays`)
+                }
+                setAnalyticsData({ ...dbAnalytics.current!, clients })
+              })
+              .catch(() => {})
+          } else if (dbAnalytics.current) {
+            // Normal cycle: merge cached DB analytics with live client data
             setAnalyticsData({ ...dbAnalytics.current, clients })
           }
 
@@ -135,24 +167,26 @@ export const useJellyfinPolling = () => {
             historySynced.current = true
             ;(async () => {
               try {
+                console.log('[FinScope] Starting history sync…')
                 let result = await JellyfinAPI.syncHistory()
-                console.log(`History sync: +${result.newEntries} (${result.totalEntries} total)`)
+                console.log(`[FinScope] History sync: +${result.newEntries} new (${result.totalEntries} total in DB)`)
 
                 // If DB is empty after normal sync, force a full re-sync (clears stale sync_meta)
                 if (result.totalEntries === 0) {
-                  console.log('DB empty after sync — forcing full re-sync…')
+                  console.log('[FinScope] DB empty after sync — forcing full re-sync…')
                   result = await JellyfinAPI.syncHistory(true)
-                  console.log(`Force sync: +${result.newEntries} (${result.totalEntries} total)`)
+                  console.log(`[FinScope] Force sync: +${result.newEntries} new (${result.totalEntries} total in DB)`)
                 }
 
                 const analytics = await JellyfinAPI.getStoredAnalytics()
+                console.log(`[FinScope] Analytics loaded: ${analytics.totalPlays} plays, ${Object.keys(analytics.historyMap).length} days`)
                 dbAnalytics.current = {
                   historyMap: analytics.historyMap,
                   peakHours: analytics.peakHours,
                 }
                 setAnalyticsData({ ...dbAnalytics.current, clients })
               } catch (err) {
-                console.error('History sync failed:', err)
+                console.error('[FinScope] History sync failed:', err)
               }
             })()
           }

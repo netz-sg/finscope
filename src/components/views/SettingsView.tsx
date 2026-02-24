@@ -1,6 +1,6 @@
 import { useState, useRef, type FormEvent } from 'react'
 import {
-  Settings, Server, Info, Radio, Github, Coffee, Trash2, Globe,
+  Settings, Server, Info, Github, Coffee, Trash2, Globe,
   User, Camera, Check, Loader2, Eye, EyeOff, KeyRound, Pencil, RotateCcw,
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
@@ -473,9 +473,7 @@ export default function SettingsView() {
             {/* App Info */}
             <div className={`rounded-[2.5rem] p-8 ${GLASS_PANEL}`}>
               <div className="flex flex-col items-center text-center mb-8">
-                <div className="w-20 h-20 bg-white text-black rounded-full flex items-center justify-center mb-5 shadow-[0_0_40px_rgba(255,255,255,0.15)]">
-                  <Radio size={32} />
-                </div>
+                <img src="/icon_finscope.png" alt="FinScope" className="w-20 h-20 rounded-2xl mb-5 shadow-[0_0_40px_rgba(99,102,241,0.2)]" />
                 <h3 className="text-3xl font-black tracking-tighter uppercase">
                   {t('app.name')}
                 </h3>

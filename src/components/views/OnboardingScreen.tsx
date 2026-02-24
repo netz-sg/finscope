@@ -1,6 +1,6 @@
 import { useState, useEffect, type FormEvent } from 'react'
 import {
-  Radio, User, Server, ArrowRight, ArrowLeft, Check, Eye, EyeOff, Loader2,
+  User, Server, ArrowRight, ArrowLeft, Check, Eye, EyeOff, Loader2,
   Film, Tv, Music, Clapperboard,
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
@@ -548,10 +548,7 @@ export default function OnboardingScreen({ isRerun = false }: Props) {
         {/* ─── Language ─── */}
         {step === 'language' && (
           <div className="flex flex-col items-center text-center">
-            <div className="w-24 h-24 bg-white text-black rounded-full flex items-center justify-center mb-10 shadow-[0_0_60px_rgba(255,255,255,0.2)]">
-              <Radio size={40} />
-            </div>
-            <h1 className="text-5xl sm:text-6xl font-black tracking-tighter mb-3">FINSCOPE</h1>
+            <img src="/logo_finscope.png" alt="FinScope" className="h-20 sm:h-24 mb-10 drop-shadow-[0_0_40px_rgba(99,102,241,0.3)]" />
             <p className="text-white/40 text-xs font-mono tracking-widest uppercase mb-14">{t('app.subtitle')}</p>
             <p className="text-white/50 text-sm mb-8">Choose your language / Wähle deine Sprache</p>
             <div className="grid grid-cols-2 gap-4 w-full max-w-sm">
@@ -574,17 +571,24 @@ export default function OnboardingScreen({ isRerun = false }: Props) {
         {/* ─── Welcome ─── */}
         {step === 'welcome' && (
           <div className="flex flex-col items-center text-center">
-            <div className="w-20 h-20 bg-white text-black rounded-full flex items-center justify-center mb-8 shadow-[0_0_60px_rgba(255,255,255,0.2)]">
-              <Radio size={36} />
-            </div>
-            <h1 className="text-4xl sm:text-5xl font-black tracking-tighter mb-3">
-              {isRerun ? t('onboarding.welcomeBack') : 'FINSCOPE'}
-            </h1>
+            <img src="/logo_finscope.png" alt="FinScope" className="h-16 sm:h-20 mb-8 drop-shadow-[0_0_40px_rgba(99,102,241,0.3)]" />
+            {isRerun && (
+              <h2 className="text-3xl sm:text-4xl font-black tracking-tighter mb-3">{t('onboarding.welcomeBack')}</h2>
+            )}
             <p className="text-white/40 text-xs font-mono tracking-widest uppercase mb-10">{t('app.subtitle')}</p>
             <div className={`rounded-3xl p-8 mb-2 w-full max-w-lg transition-all duration-500 ease-out ${GLASS_PANEL} ${mockVisible ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-6'}`}>
               <p className="text-sm text-white/50 leading-relaxed">{t('onboarding.welcomeText')}</p>
             </div>
-            <NavButtons nextLabel={t('onboarding.continue')} onNext={goNext} />
+            {/* Single continue button — no back to language */}
+            <div className="max-w-sm mx-auto mt-8 w-full">
+              <button
+                onClick={goNext}
+                className={`w-full flex items-center justify-center gap-3 bg-white text-black rounded-2xl py-4 font-bold text-sm hover:bg-neutral-200 hover:shadow-[0_0_30px_rgba(255,255,255,0.3)] ${TRANSITION}`}
+              >
+                {t('onboarding.continue')}
+                <ArrowRight size={18} />
+              </button>
+            </div>
           </div>
         )}
 

@@ -7,19 +7,11 @@ import bcrypt from 'bcryptjs'
 import multer from 'multer'
 import db, { AVATAR_DIR, DB_FILE_PATH } from './db.js'
 
-/* ================================================================ */
-/*  Express Setup                                                    */
-/* ================================================================ */
-
 const app = express()
 const PORT = parseInt(process.env.PROXY_PORT || '3001', 10)
 
 app.use(cors())
 app.use(express.json())
-
-/* ================================================================ */
-/*  Types                                                            */
-/* ================================================================ */
 
 interface AuthUser {
   id: string
@@ -35,9 +27,7 @@ declare global {
   }
 }
 
-/* ================================================================ */
-/*  Helpers                                                          */
-/* ================================================================ */
+// --- Helpers ---
 
 const makeHeaders = (apiKey: string) => ({
   'X-Emby-Authorization': `MediaBrowser Client="FinScope", Device="Web", DeviceId="finscope-proxy-v1", Version="1.0.0", Token="${apiKey}"`,
@@ -66,7 +56,6 @@ function maskApiKey(key: string): string {
   return key.slice(0, 4) + '***' + key.slice(-4)
 }
 
-/** Look up the active Jellyfin config for a user */
 function getJellyfinConfig(userId: string) {
   return db
     .prepare(
@@ -77,9 +66,7 @@ function getJellyfinConfig(userId: string) {
     | undefined
 }
 
-/* ================================================================ */
-/*  Auth Middleware                                                   */
-/* ================================================================ */
+// --- Auth Middleware ---
 
 function requireAuth(req: Request, res: Response, next: NextFunction): void {
   const authHeader = req.headers.authorization
@@ -112,10 +99,6 @@ function requireAuth(req: Request, res: Response, next: NextFunction): void {
   next()
 }
 
-/* ================================================================ */
-/*  Multer (Avatar Upload)                                           */
-/* ================================================================ */
-
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 512 * 1024 },
@@ -128,20 +111,14 @@ const upload = multer({
   },
 })
 
-/* ================================================================ */
-/*  SETUP ENDPOINTS (public)                                         */
-/* ================================================================ */
+// --- Setup ---
 
 app.get('/api/setup/status', (_req, res) => {
   const count = (db.prepare('SELECT COUNT(*) as cnt FROM users').get() as { cnt: number }).cnt
   res.json({ setupComplete: count > 0, hasUsers: count > 0 })
 })
 
-/* ================================================================ */
-/*  AUTH ENDPOINTS                                                   */
-/* ================================================================ */
-
-// Register (only when no users exist yet — onboarding)
+// --- Auth ---
 app.post('/api/auth/register', async (req, res) => {
   const { username, password } = req.body as { username?: string; password?: string }
 
@@ -184,7 +161,6 @@ app.post('/api/auth/register', async (req, res) => {
   }
 })
 
-// Login
 app.post('/api/auth/login', async (req, res) => {
   const { username, password } = req.body as { username?: string; password?: string }
 
@@ -222,14 +198,12 @@ app.post('/api/auth/login', async (req, res) => {
   })
 })
 
-// Logout
 app.post('/api/auth/logout', requireAuth, (req, res) => {
   const token = req.headers.authorization!.slice(7)
   db.prepare('DELETE FROM sessions WHERE token = ?').run(token)
   res.json({ success: true })
 })
 
-// Get current user profile + jellyfin config
 app.get('/api/auth/me', requireAuth, (req, res) => {
   const user = db
     .prepare('SELECT id, username, display_name, avatar_path, role, created_at FROM users WHERE id = ?')
@@ -264,7 +238,6 @@ app.get('/api/auth/me', requireAuth, (req, res) => {
   })
 })
 
-// Update profile
 app.patch('/api/auth/me', requireAuth, (req, res) => {
   const { username, displayName } = req.body as { username?: string; displayName?: string }
 
@@ -306,7 +279,6 @@ app.patch('/api/auth/me', requireAuth, (req, res) => {
   })
 })
 
-// Change password
 app.post('/api/auth/change-password', requireAuth, async (req, res) => {
   const { currentPassword, newPassword } = req.body as {
     currentPassword?: string
@@ -342,7 +314,6 @@ app.post('/api/auth/change-password', requireAuth, async (req, res) => {
   res.json({ success: true })
 })
 
-// Upload avatar
 app.post('/api/auth/avatar', requireAuth, upload.single('avatar'), (req, res) => {
   if (!req.file) {
     res.status(400).json({ error: 'No file uploaded' })
@@ -353,7 +324,6 @@ app.post('/api/auth/avatar', requireAuth, upload.single('avatar'), (req, res) =>
   const filename = `${req.user!.id}${ext}`
   const filePath = path.join(AVATAR_DIR, filename)
 
-  // Remove old avatar files
   const oldFiles = fs.readdirSync(AVATAR_DIR).filter((f) => f.startsWith(req.user!.id))
   oldFiles.forEach((f) => fs.unlinkSync(path.join(AVATAR_DIR, f)))
 
@@ -366,7 +336,6 @@ app.post('/api/auth/avatar', requireAuth, upload.single('avatar'), (req, res) =>
   res.json({ avatarUrl: `/api/auth/avatar/${req.user!.id}?t=${Date.now()}` })
 })
 
-// Delete avatar
 app.delete('/api/auth/avatar', requireAuth, (req, res) => {
   const oldFiles = fs.readdirSync(AVATAR_DIR).filter((f) => f.startsWith(req.user!.id))
   oldFiles.forEach((f) => fs.unlinkSync(path.join(AVATAR_DIR, f)))
@@ -378,7 +347,6 @@ app.delete('/api/auth/avatar', requireAuth, (req, res) => {
   res.json({ success: true })
 })
 
-// Serve avatar (public — needed for img tags)
 app.get('/api/auth/avatar/:userId', (req, res) => {
   const userId = req.params.userId
   const user = db.prepare('SELECT avatar_path FROM users WHERE id = ?').get(userId) as
@@ -403,11 +371,7 @@ app.get('/api/auth/avatar/:userId', (req, res) => {
   res.send(fs.readFileSync(filePath))
 })
 
-/* ================================================================ */
-/*  JELLYFIN CONFIG ENDPOINTS                                        */
-/* ================================================================ */
-
-// Save/update Jellyfin config (validates connection first)
+// --- Jellyfin Config ---
 app.post('/api/jellyfin-config', requireAuth, async (req, res) => {
   const { serverUrl, apiKey } = req.body as { serverUrl?: string; apiKey?: string }
 
@@ -418,7 +382,6 @@ app.post('/api/jellyfin-config', requireAuth, async (req, res) => {
 
   const baseUrl = cleanUrl(serverUrl)
 
-  // Validate connection
   try {
     const infoRes = await fetch(`${baseUrl}/System/Info`, {
       method: 'GET',
@@ -431,7 +394,6 @@ app.post('/api/jellyfin-config', requireAuth, async (req, res) => {
 
     const info = (await infoRes.json()) as { ServerName?: string }
 
-    // Find the admin user on Jellyfin
     const usersRes = await fetch(`${baseUrl}/Users`, {
       method: 'GET',
       headers: makeHeaders(apiKey),
@@ -442,7 +404,6 @@ app.post('/api/jellyfin-config', requireAuth, async (req, res) => {
     const adminJfUser = jfUsers.find((u) => u.Policy?.IsAdministrator) || jfUsers[0]
     const jfUserId = adminJfUser?.Id || ''
 
-    // Upsert config
     db.prepare(
       `INSERT INTO jellyfin_configs (user_id, server_url, api_key, jellyfin_user_id, server_name)
        VALUES (?, ?, ?, ?, ?)
@@ -452,7 +413,6 @@ app.post('/api/jellyfin-config', requireAuth, async (req, res) => {
          server_name = excluded.server_name`,
     ).run(req.user!.id, baseUrl, apiKey, jfUserId, info.ServerName || 'Jellyfin')
 
-    // Deactivate other configs, activate this one
     db.prepare('UPDATE jellyfin_configs SET is_active = 0 WHERE user_id = ?').run(req.user!.id)
     db.prepare(
       'UPDATE jellyfin_configs SET is_active = 1 WHERE user_id = ? AND server_url = ?',
@@ -469,7 +429,6 @@ app.post('/api/jellyfin-config', requireAuth, async (req, res) => {
   }
 })
 
-// Get Jellyfin config (masked API key)
 app.get('/api/jellyfin-config', requireAuth, (req, res) => {
   const config = getJellyfinConfig(req.user!.id)
   if (!config) {
@@ -486,9 +445,7 @@ app.get('/api/jellyfin-config', requireAuth, (req, res) => {
   })
 })
 
-/* ================================================================ */
-/*  JELLYFIN PROXY (now with auth + DB lookup)                       */
-/* ================================================================ */
+// --- Jellyfin Proxy ---
 
 app.get('/api/jellyfin', requireAuth, async (req, res) => {
   const { endpoint } = req.query as Record<string, string>
@@ -498,7 +455,6 @@ app.get('/api/jellyfin', requireAuth, async (req, res) => {
     return
   }
 
-  // Look up Jellyfin credentials from DB
   const config = getJellyfinConfig(req.user!.id)
   if (!config) {
     res.status(400).json({ error: 'No Jellyfin server configured' })
@@ -525,9 +481,7 @@ app.get('/api/jellyfin', requireAuth, async (req, res) => {
   }
 })
 
-/* ================================================================ */
-/*  HISTORY SYNC (now with auth + DB lookup)                         */
-/* ================================================================ */
+// --- History Sync ---
 
 app.post('/api/history/sync', requireAuth, async (req, res) => {
   const config = getJellyfinConfig(req.user!.id)
@@ -540,7 +494,6 @@ app.post('/api/history/sync', requireAuth, async (req, res) => {
   const headers = makeHeaders(config.api_key)
   const forceFullSync = req.query.force === 'true'
 
-  // If force mode, clear all sync_meta for this server so we re-fetch everything
   if (forceFullSync) {
     db.prepare('DELETE FROM sync_meta WHERE server_url = ?').run(baseUrl)
   }
@@ -550,7 +503,6 @@ app.post('/api/history/sync', requireAuth, async (req, res) => {
     VALUES (?, ?, ?, ?, ?, ?)
   `)
 
-  // Fetch ALL Jellyfin users so we can sync every user's playback
   let jfUsers: { Id: string; Name: string }[] = []
   try {
     const usersRes = await fetch(`${baseUrl}/Users`, { method: 'GET', headers })
@@ -581,8 +533,6 @@ app.post('/api/history/sync', requireAuth, async (req, res) => {
       let maxDatePlayed: string | null = null
 
       while (!done) {
-        // Use Filters=IsPlayed AND also request items with DatePlayed populated
-        // Some Jellyfin versions don't populate DatePlayed with IsPlayed filter alone
         const endpoint = `/Users/${userId}/Items?SortBy=DatePlayed&SortOrder=Descending&Filters=IsPlayed&IncludeItemTypes=Movie,Episode,Audio,MusicAlbum&Limit=${BATCH_SIZE}&StartIndex=${startIndex}&Fields=DatePlayed&Recursive=true`
         const url = `${baseUrl}${endpoint}`
         const response = await fetch(url, { method: 'GET', headers })
@@ -607,13 +557,9 @@ app.post('/api/history/sync', requireAuth, async (req, res) => {
         const insertBatch = db.transaction(
           (batch: { Id: string; Name: string; Type: string; DatePlayed?: string }[]) => {
             for (const item of batch) {
-              // Use DatePlayed if available, otherwise fall back to current time
-              // Many Jellyfin versions return IsPlayed items WITHOUT DatePlayed
               const datePlayed = item.DatePlayed || new Date().toISOString()
 
-              // Only skip if we already synced past this point (incremental sync)
               if (meta?.last_sync && datePlayed <= meta.last_sync) {
-                // Only stop pagination if we have a real DatePlayed (DESC order)
                 if (item.DatePlayed) {
                   done = true
                   break
@@ -622,7 +568,6 @@ app.post('/api/history/sync', requireAuth, async (req, res) => {
               }
               insert.run(baseUrl, userId, item.Id, item.Name, item.Type, datePlayed)
               userInserted++
-              // Track the newest item date (first item in DESC order is newest)
               if (!maxDatePlayed || datePlayed > maxDatePlayed) {
                 maxDatePlayed = datePlayed
               }
@@ -639,7 +584,6 @@ app.post('/api/history/sync', requireAuth, async (req, res) => {
 
       grandTotalInserted += userInserted
 
-      // Update sync_meta per user — use max item date, NOT current time
       if (maxDatePlayed) {
         db.prepare(
           `INSERT INTO sync_meta (server_url, user_id, last_sync, total_synced)
@@ -664,11 +608,7 @@ app.post('/api/history/sync', requireAuth, async (req, res) => {
   }
 })
 
-/* ================================================================ */
-/*  LIVE SESSION TRACKING                                            */
-/*  Records active sessions as playback events — more reliable than  */
-/*  Jellyfin's IsPlayed history for analytics.                       */
-/* ================================================================ */
+// --- Live Session Tracking ---
 
 app.post('/api/history/track-sessions', requireAuth, (req, res) => {
   const config = getJellyfinConfig(req.user!.id)
@@ -695,7 +635,6 @@ app.post('/api/history/track-sessions', requireAuth, (req, res) => {
 
   const baseUrl = config.server_url
   const now = new Date().toISOString()
-  // Round to the nearest hour so we don't duplicate entries for the same session within the same hour
   const hourKey = now.slice(0, 13) + ':00:00.000Z'
 
   const insert = db.prepare(`
@@ -710,7 +649,7 @@ app.post('/api/history/track-sessions', requireAuth, (req, res) => {
         insert.run(baseUrl, s.userId, s.itemId, s.itemName, s.itemType, hourKey)
         tracked++
       } catch {
-        // UNIQUE constraint = already tracked this hour
+        // duplicate
       }
     }
   })
@@ -724,9 +663,7 @@ app.post('/api/history/track-sessions', requireAuth, (req, res) => {
   res.json({ tracked })
 })
 
-/* ================================================================ */
-/*  ANALYTICS (now with auth + DB lookup)                            */
-/* ================================================================ */
+// --- Analytics ---
 
 app.get('/api/history/analytics', requireAuth, (req, res) => {
   const config = getJellyfinConfig(req.user!.id)
@@ -736,7 +673,6 @@ app.get('/api/history/analytics', requireAuth, (req, res) => {
     return
   }
 
-  // Aggregate across ALL users on this server (no date cutoff — full history)
   const rows = db
     .prepare(
       `SELECT date_played FROM playback_history
@@ -766,11 +702,7 @@ app.get('/api/history/analytics', requireAuth, (req, res) => {
   res.json({ historyMap, peakHours, totalPlays: rows.length })
 })
 
-/* ================================================================ */
-/*  IMAGE PROXIES                                                    */
-/*  <img> tags can't send Authorization headers, so these endpoints  */
-/*  accept the token as a query param (?token=...) as fallback.      */
-/* ================================================================ */
+// --- Image Proxies (token via query param for <img> tags) ---
 
 function resolveImageAuth(req: Request): string | null {
   const authHeader = req.headers.authorization
@@ -845,9 +777,7 @@ app.get('/api/jellyfin/user-image', async (req, res) => {
   }
 })
 
-/* ================================================================ */
-/*  PULSE STATS (DB metrics for PulseView)                           */
-/* ================================================================ */
+// --- Pulse Stats ---
 
 app.get('/api/pulse-stats', requireAuth, (req, res) => {
   const config = getJellyfinConfig(req.user!.id)
@@ -856,14 +786,13 @@ app.get('/api/pulse-stats', requireAuth, (req, res) => {
   try {
     dbSizeBytes = fs.statSync(DB_FILE_PATH).size
   } catch {
-    // DB file not accessible
+    // ignore
   }
 
   let totalHistoryEntries = 0
   let lastSyncTime: string | null = null
 
   if (config) {
-    // Count across ALL users on this server
     totalHistoryEntries = (
       db
         .prepare('SELECT COUNT(*) as cnt FROM playback_history WHERE server_url = ?')
@@ -880,9 +809,7 @@ app.get('/api/pulse-stats', requireAuth, (req, res) => {
   res.json({ dbSizeBytes, totalHistoryEntries, lastSyncTime })
 })
 
-/* ================================================================ */
-/*  GENRE AGGREGATION                                                */
-/* ================================================================ */
+// --- Genres ---
 
 app.get('/api/genres', requireAuth, async (req, res) => {
   const config = getJellyfinConfig(req.user!.id)
@@ -908,7 +835,6 @@ app.get('/api/genres', requireAuth, async (req, res) => {
       Items?: { Genres?: string[] }[]
     }
 
-    // Count genre occurrences
     const genreMap: Record<string, number> = {}
     let totalItems = 0
 
@@ -921,7 +847,6 @@ app.get('/api/genres', requireAuth, async (req, res) => {
       }
     }
 
-    // Sort by count, take top 8
     const sorted = Object.entries(genreMap)
       .sort(([, a], [, b]) => b - a)
       .slice(0, 8)
@@ -937,17 +862,9 @@ app.get('/api/genres', requireAuth, async (req, res) => {
   }
 })
 
-/* ================================================================ */
-/*  HEALTH                                                           */
-/* ================================================================ */
-
 app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok', service: 'finscope-proxy' })
 })
-
-/* ================================================================ */
-/*  START                                                            */
-/* ================================================================ */
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`FinScope Proxy running on port ${PORT}`)

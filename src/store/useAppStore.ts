@@ -4,24 +4,16 @@ import type { AppStatus, AppPhase, AppConfig, FinScopeUser, JellyfinConfigData }
 import type { ServerInfo } from '../types/jellyfin'
 
 interface AppState {
-  // Phase-based routing
   phase: AppPhase
-
-  // User account
   user: FinScopeUser | null
   sessionToken: string | null
-
-  // Jellyfin connection (from server)
   jellyfinConfig: JellyfinConfigData | null
-
-  // Backward-compatible fields (used by existing Dashboard components)
   config: AppConfig
   status: AppStatus
   errorMsg: string
   isDemoMode: boolean
   serverInfo: ServerInfo | null
 
-  // Actions
   initialize: () => Promise<void>
   login: (username: string, password: string) => Promise<void>
   register: (username: string, password: string) => Promise<void>
@@ -33,7 +25,6 @@ interface AppState {
   removeAvatar: () => Promise<void>
   refreshProfile: () => Promise<void>
 
-  // Legacy setters (for existing components)
   setConfig: (config: Partial<AppConfig>) => void
   setStatus: (status: AppStatus) => void
   setErrorMsg: (msg: string) => void
@@ -80,7 +71,6 @@ export const useAppStore = create<AppState>((set, get) => ({
       }
     }
 
-    // No valid token — check if setup is complete
     try {
       const setup = await AuthAPI.getSetupStatus()
       set({ phase: setup.hasUsers ? 'login' : 'onboarding' })
@@ -96,8 +86,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({
       user: data.user as FinScopeUser,
       sessionToken: data.token,
-      // Stay in onboarding phase — user still needs to connect Jellyfin
-    })
+      })
   },
 
   login: async (username, password) => {
@@ -105,7 +94,6 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (data.error || !data.token || !data.user) throw new Error(data.error || 'Login failed')
     localStorage.setItem('finscope_session_token', data.token)
 
-    // Fetch full profile to get Jellyfin config
     const me = await AuthAPI.getMe()
     const jf = me.jellyfinConfig
 
@@ -125,7 +113,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     try {
       await AuthAPI.logout()
     } catch {
-      // Ignore logout API errors
+      // noop
     }
     localStorage.removeItem('finscope_session_token')
     set({
@@ -145,10 +133,8 @@ export const useAppStore = create<AppState>((set, get) => ({
     const result = await AuthAPI.saveJellyfinConfig(serverUrl, apiKey)
     if (result.error) return { success: false, error: result.error }
 
-    // Refresh profile to get updated Jellyfin config
     const me = await AuthAPI.getMe()
     const jf = me.jellyfinConfig
-
     set({
       phase: 'authenticated',
       jellyfinConfig: jf,
@@ -203,11 +189,10 @@ export const useAppStore = create<AppState>((set, get) => ({
           : { url: '', apiKey: '', userId: '' },
       })
     } catch {
-      // Ignore refresh errors
+      // noop
     }
   },
 
-  // Legacy setters for backward compat
   setConfig: (partial) => set((state) => ({ config: { ...state.config, ...partial } })),
   setStatus: (status) => set({ status }),
   setErrorMsg: (errorMsg) => set({ errorMsg }),
@@ -215,7 +200,6 @@ export const useAppStore = create<AppState>((set, get) => ({
   setRememberMe: () => {},
   setServerInfo: (serverInfo) => set({ serverInfo }),
   loadSavedConfig: () => {
-    // Replaced by initialize() — kept for compat
     get().initialize()
   },
 }))

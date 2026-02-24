@@ -69,7 +69,6 @@ db.exec(`
   );
 `)
 
-// Ensure avatars directory exists
 const avatarDir = path.resolve(path.dirname(DB_PATH), 'avatars')
 fs.mkdirSync(avatarDir, { recursive: true })
 

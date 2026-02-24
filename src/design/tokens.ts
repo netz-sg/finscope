@@ -1,10 +1,3 @@
-/**
- * FinScope Design System: Apple Liquid Glass
- *
- * Alle Komponenten MÜSSEN diese Tokens verwenden.
- * Keine eigenen halbtransparenten Boxen erfinden!
- */
-
 export const TRANSITION =
   'transition-all duration-500 ease-[cubic-bezier(0.16,1,0.3,1)]'
 

@@ -7,10 +7,7 @@ const getAuthHeaders = (): Record<string, string> => {
   return token ? { Authorization: `Bearer ${token}` } : {}
 }
 
-/**
- * proxyFetch: The proxy now reads Jellyfin credentials from the DB (via auth token).
- * The `_url` and `_apiKey` params are kept for backward-compat but are NOT sent anymore.
- */
+// _url and _apiKey kept for compat but proxy reads creds from DB now
 const proxyFetch = async <T>(
   endpoint: string,
   _url: string,
@@ -62,7 +59,6 @@ export const JellyfinAPI = {
       { TotalRecordCount: 0 },
     ).then((data) => ({ playCount: data.TotalRecordCount || 0 })),
 
-  /** Trigger paginated history sync → SQLite (proxy-side). force=true clears sync_meta for full re-sync. */
   syncHistory: async (force = false): Promise<{ newEntries: number; totalEntries: number }> => {
     try {
       const url = force ? '/api/history/sync?force=true' : '/api/history/sync'
@@ -81,7 +77,6 @@ export const JellyfinAPI = {
     }
   },
 
-  /** Load pre-computed analytics from SQLite */
   getStoredAnalytics: async (): Promise<{
     historyMap: Record<string, number>
     peakHours: number[]
@@ -102,7 +97,6 @@ export const JellyfinAPI = {
     }
   },
 
-  /** Track active sessions as playback events (called every poll cycle) */
   trackSessions: async (sessions: { userId: string; userName: string; itemId: string; itemName: string; itemType: string; client: string }[]): Promise<void> => {
     if (sessions.length === 0) return
     try {
@@ -112,7 +106,7 @@ export const JellyfinAPI = {
         body: JSON.stringify({ sessions }),
       })
     } catch {
-      // Silent — don't disrupt polling
+      // noop
     }
   },
 
@@ -156,7 +150,6 @@ export const JellyfinAPI = {
       null,
     ),
 
-  /** Image URLs include token as query param since <img> tags can't send Authorization headers */
   getItemImageUrl: (_serverUrl: string, itemId: string, type = 'Primary'): string => {
     const token = getToken()
     return `/api/jellyfin/image?itemId=${encodeURIComponent(itemId)}&type=${type}${token ? `&token=${token}` : ''}`
@@ -172,7 +165,6 @@ export const JellyfinAPI = {
     return `/api/jellyfin/user-image?userId=${encodeURIComponent(userId)}${token ? `&token=${token}` : ''}`
   },
 
-  /** Fetch random Movies and Series for the hero carousel */
   getRandomHeroItems: (url: string, apiKey: string, userId: string): Promise<NowPlayingItem[]> =>
     proxyFetch<{ Items?: NowPlayingItem[] }>(
       `/Users/${userId}/Items?SortBy=Random&Limit=10&Recursive=true&IncludeItemTypes=Movie,Series&Fields=Overview,ParentBackdropItemId,ParentLogoItemId`,
@@ -181,7 +173,6 @@ export const JellyfinAPI = {
       { Items: [] },
     ).then((data) => data.Items || []),
 
-  /** Fetch pulse stats from proxy DB */
   getPulseStats: async (): Promise<{
     dbSizeBytes: number
     totalHistoryEntries: number
@@ -198,7 +189,6 @@ export const JellyfinAPI = {
     }
   },
 
-  /** Fetch genre distribution from proxy */
   getGenreDistribution: async (): Promise<{ name: string; count: number; pct: number }[]> => {
     try {
       const response = await fetch('/api/genres', {

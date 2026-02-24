@@ -13,7 +13,6 @@ const authFetch = async (url: string, options?: RequestInit) => {
   })
 }
 
-/** Safely parse JSON — if the response is HTML (e.g. nginx 502), throw a readable error. */
 async function safeJson<T>(res: Response): Promise<T> {
   const text = await res.text()
   try {

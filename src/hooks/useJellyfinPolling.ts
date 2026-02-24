@@ -53,7 +53,6 @@ export const useJellyfinPolling = () => {
     null,
   )
 
-  // Reset flags when status changes away from success
   useEffect(() => {
     if (status !== 'success') {
       historySynced.current = false
@@ -64,7 +63,6 @@ export const useJellyfinPolling = () => {
     }
   }, [status])
 
-  // Demo mode setup
   useEffect(() => {
     if (status !== 'success' || !isDemoMode) return
 
@@ -77,7 +75,6 @@ export const useJellyfinPolling = () => {
     setServerInfo({ ServerName: 'FinScope Nexus', Version: '10.8.13', OperatingSystem: 'Docker' })
   }, [status, isDemoMode])
 
-  // Live polling: sessions, users, counts, library (every 10s)
   useEffect(() => {
     if (status !== 'success' || isDemoMode) return
 
@@ -104,13 +101,11 @@ export const useJellyfinPolling = () => {
           ])
           setLibraryData({ mostPlayed, latest, libraries })
 
-          // Compute clients from live sessions
           const clients: Record<string, number> = {}
           activeSessions.forEach((s) => {
             if (s.Client) clients[s.Client] = (clients[s.Client] || 0) + 1
           })
 
-          // Track active sessions as playback history (live capture)
           if (activeSessions.length > 0) {
             const trackable = activeSessions
               .filter((s) => s.NowPlayingItem && !s.PlayState.IsPaused)
@@ -125,8 +120,6 @@ export const useJellyfinPolling = () => {
             JellyfinAPI.trackSessions(trackable)
           }
 
-          // Periodically refresh analytics from DB (every ~60s = 6 poll cycles)
-          // This picks up new data from live session tracking
           analyticsRefreshCounter.current++
           if (dbAnalytics.current && analyticsRefreshCounter.current % 6 === 0) {
             JellyfinAPI.getStoredAnalytics()
@@ -142,11 +135,9 @@ export const useJellyfinPolling = () => {
               })
               .catch(() => {})
           } else if (dbAnalytics.current) {
-            // Normal cycle: merge cached DB analytics with live client data
             setAnalyticsData({ ...dbAnalytics.current, clients })
           }
 
-          // ONE-TIME: Fetch real server info (Version, OS, Architecture)
           if (!serverInfoFetched.current) {
             serverInfoFetched.current = true
             JellyfinAPI.connect(config.url, config.apiKey)
@@ -154,7 +145,6 @@ export const useJellyfinPolling = () => {
               .catch(() => {})
           }
 
-          // ONE-TIME: Fetch random hero items (Movies + Series)
           if (!heroFetched.current) {
             heroFetched.current = true
             JellyfinAPI.getRandomHeroItems(config.url, config.apiKey, adminUser.Id)
@@ -162,7 +152,6 @@ export const useJellyfinPolling = () => {
               .catch(() => {})
           }
 
-          // ONE-TIME: Sync history to SQLite, then load analytics
           if (!historySynced.current) {
             historySynced.current = true
             ;(async () => {
@@ -171,7 +160,6 @@ export const useJellyfinPolling = () => {
                 let result = await JellyfinAPI.syncHistory()
                 console.log(`[FinScope] History sync: +${result.newEntries} new (${result.totalEntries} total in DB)`)
 
-                // If DB is empty after normal sync, force a full re-sync (clears stale sync_meta)
                 if (result.totalEntries === 0) {
                   console.log('[FinScope] DB empty after sync — forcing full re-sync…')
                   result = await JellyfinAPI.syncHistory(true)
@@ -191,7 +179,6 @@ export const useJellyfinPolling = () => {
             })()
           }
 
-          // ONE-TIME: Fetch genre distribution + pulse stats
           if (!extraDataFetched.current) {
             extraDataFetched.current = true
             JellyfinAPI.getGenreDistribution()

@@ -1,0 +1,17 @@
+services:
+  finscope:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: finscope
+    ports:
+      - "8080:80"
+    environment:
+      - PROXY_PORT=3001
+      - DB_PATH=/data/finscope.db
+    volumes:
+      - finscope_data:/data
+    restart: unless-stopped
+
+volumes:
+  finscope_data:

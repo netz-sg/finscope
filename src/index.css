@@ -1,0 +1,76 @@
+@import 'tailwindcss';
+
+@theme {
+  --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+}
+
+body {
+  margin: 0;
+  background: #020202;
+  color: white;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+::selection {
+  background: white;
+  color: black;
+}
+
+.hide-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+.hide-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes slide-in-from-bottom {
+  from { transform: translateY(2rem); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+@keyframes zoom-in-95 {
+  from { transform: scale(0.95); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
+}
+
+.animate-fade-in {
+  animation: fade-in 0.7s ease-out both;
+}
+
+.animate-slide-up {
+  animation: fade-in 0.7s ease-out both, slide-in-from-bottom 0.7s ease-out both;
+}
+
+.animate-zoom-in {
+  animation: fade-in 0.5s cubic-bezier(0.16, 1, 0.3, 1) both,
+    zoom-in-95 0.5s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* ── Hero Ken Burns (slow zoom + fade-in) ── */
+@keyframes hero-ken-burns {
+  0%   { transform: scale(1.02); opacity: 0; }
+  10%  { opacity: 1; }
+  100% { transform: scale(1.08); opacity: 1; }
+}
+
+@keyframes hero-content-in {
+  from { transform: translateY(1.25rem); opacity: 0; filter: blur(4px); }
+  to   { transform: translateY(0); opacity: 1; filter: blur(0); }
+}
+
+.animate-hero-kb {
+  animation: hero-ken-burns 9s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.animate-hero-content {
+  animation: hero-content-in 0.9s cubic-bezier(0.16, 1, 0.3, 1) both;
+}

@@ -1750,7 +1750,12 @@ app.get('/api/history/analytics/user-comparison', requireAuth, async (req, res) 
   let jfUsers: { Id?: string; Name?: string; PrimaryImageTag?: string; HasPrimaryImage?: boolean }[] = []
   try {
     const { data } = await getUserApi(ctx.api).getUsers()
-    jfUsers = data
+    jfUsers = data.map((u) => ({
+      Id: u.Id ?? undefined,
+      Name: u.Name ?? undefined,
+      PrimaryImageTag: u.PrimaryImageTag ?? undefined,
+      HasPrimaryImage: u.PrimaryImageTag != null,
+    }))
   } catch { /* noop */ }
 
   const userMap = new Map<string, { name: string; hasImage: boolean }>()

@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, useCallback } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { CheckCircle2, XCircle, Info, X, Play, Square, Zap, AlertTriangle } from 'lucide-react'
 import { useToastStore, type Toast } from '../../store/useToastStore'
 import { JellyfinAPI } from '../../api/jellyfin'

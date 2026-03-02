@@ -1,0 +1,57 @@
+<?xml version="1.0"?>
+<Container version="2">
+  <Name>FinScope</Name>
+  <Repository>ghcr.io/netz-sg/finscope:latest</Repository>
+  <Registry>https://ghcr.io</Registry>
+  <Network>bridge</Network>
+  <Shell>sh</Shell>
+  <Privileged>false</Privileged>
+  <Support>https://github.com/YOUR_GITHUB_USERNAME/finscope/issues</Support>
+  <Project>https://github.com/YOUR_GITHUB_USERNAME/finscope</Project>
+  <Overview>FinScope is a modern monitoring dashboard for Jellyfin. Real-time stream radar, deep analytics, user tracking, system pulse and activity log — all in a cinematic dark UI.</Overview>
+  <Category>MediaApp:Video MediaApp:Music Tools:</Category>
+  <WebUI>http://[IP]:[PORT:8080]/</WebUI>
+  <TemplateURL>https://raw.githubusercontent.com/YOUR_GITHUB_USERNAME/unraid-templates/main/finscope.xml</TemplateURL>
+  <Icon>https://raw.githubusercontent.com/YOUR_GITHUB_USERNAME/finscope/main/public/finscope-icon.png</Icon>
+  <ExtraParams>--restart=unless-stopped</ExtraParams>
+  <Config
+    Name="Web UI Port"
+    Target="80"
+    Default="8080"
+    Mode="tcp"
+    Description="Port to access the FinScope web interface."
+    Type="Port"
+    Display="always"
+    Required="true"
+    Mask="false">8080</Config>
+  <Config
+    Name="Data Path"
+    Target="/data"
+    Default="/mnt/user/appdata/finscope"
+    Mode="rw"
+    Description="Path where the FinScope database and config are stored."
+    Type="Path"
+    Display="always"
+    Required="true"
+    Mask="false">/mnt/user/appdata/finscope</Config>
+  <Config
+    Name="DB_PATH"
+    Target="DB_PATH"
+    Default="/data/finscope.db"
+    Mode=""
+    Description="Full path to the SQLite database file inside the container. Only change this if you know what you're doing."
+    Type="Variable"
+    Display="advanced"
+    Required="false"
+    Mask="false">/data/finscope.db</Config>
+  <Config
+    Name="PROXY_PORT"
+    Target="PROXY_PORT"
+    Default="3001"
+    Mode=""
+    Description="Internal port for the FinScope proxy API. Do not expose this externally."
+    Type="Variable"
+    Display="advanced"
+    Required="false"
+    Mask="false">3001</Config>
+</Container>

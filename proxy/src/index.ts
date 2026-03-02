@@ -15,6 +15,7 @@ import {
   getUserLibraryApi,
   getUserViewsApi,
   getLibraryApi,
+  getActivityLogApi,
 } from '@jellyfin/sdk/lib/utils/api/index.js'
 import { BaseItemKind } from '@jellyfin/sdk/lib/generated-client/models/base-item-kind.js'
 import { ItemFields } from '@jellyfin/sdk/lib/generated-client/models/item-fields.js'
@@ -24,6 +25,221 @@ import { SortOrder } from '@jellyfin/sdk/lib/generated-client/models/sort-order.
 
 const app = express()
 const PORT = parseInt(process.env.PROXY_PORT || '3001', 10)
+
+const sseClients = new Map<string, Set<Response>>()
+const sessionStreamClients = new Map<string, Set<Response>>()
+const sessionStreamCache = new Map<string, string>()
+
+function pushSessionStream(userId: string, sessions: unknown[]) {
+  const clients = sessionStreamClients.get(userId)
+  if (!clients || clients.size === 0) return
+  const payload = `data: ${JSON.stringify({ type: 'sessions', data: sessions })}\n\n`
+  for (const res of clients) {
+    try { res.write(payload) } catch { clients.delete(res) }
+  }
+}
+
+setInterval(async () => {
+  const userIds = [...sessionStreamClients.keys()].filter(
+    (id) => (sessionStreamClients.get(id)?.size ?? 0) > 0,
+  )
+  await Promise.allSettled(
+    userIds.map(async (userId) => {
+      const ctx = getApiForUser(userId)
+      if (!ctx) return
+      try {
+        const { data } = await getSessionApi(ctx.api).getSessions()
+        const sessions = data || []
+        const serialized = JSON.stringify(sessions)
+        if (serialized !== sessionStreamCache.get(userId)) {
+          sessionStreamCache.set(userId, serialized)
+          pushSessionStream(userId, sessions)
+        }
+      } catch { /* noop */ }
+    }),
+  )
+}, 2000)
+
+function pushSSE(userId: string, event: SessionEvent) {
+  const clients = sseClients.get(userId)
+  if (!clients || clients.size === 0) return
+  const data = JSON.stringify(event)
+  for (const res of clients) {
+    try { res.write(`data: ${data}\n\n`) } catch { clients.delete(res) }
+  }
+}
+
+interface SessionMeta {
+  itemId?: string
+  itemType?: string
+  userName?: string
+  seriesName?: string
+  artists?: string[]
+  album?: string
+  indexNumber?: number
+  parentIndexNumber?: number
+}
+
+interface SessionEvent {
+  eventType: 'stream_start' | 'stream_end' | 'transcode_load' | 'concurrent_threshold'
+  title: string
+  message: string
+  meta?: SessionMeta
+}
+
+interface SessionInput {
+  userId: string
+  userName: string
+  itemId?: string
+  itemName: string
+  itemType: string
+  isTranscoding?: boolean
+  seriesName?: string
+  artists?: string[]
+  album?: string
+  indexNumber?: number
+  parentIndexNumber?: number
+}
+
+const previousSessionsCache = new Map<string, Map<string, SessionInput>>()
+
+function detectSessionEvents(
+  userId: string,
+  currentSessions: SessionInput[],
+  settings: { stream_start: number; stream_end: number; transcode_load: number; threshold_concurrent: number; threshold_transcode: number },
+): SessionEvent[] {
+  const events: SessionEvent[] = []
+  const currentMap = new Map<string, SessionInput>()
+  for (const s of currentSessions) {
+    currentMap.set(`${s.userId}:${s.itemName}`, s)
+  }
+  const previousMap = previousSessionsCache.get(userId) || new Map()
+
+  if (settings.stream_start) {
+    for (const [key, s] of currentMap) {
+      if (!previousMap.has(key)) {
+        events.push({
+          eventType: 'stream_start',
+          title: `Stream Started`,
+          message: `${s.userName} started watching ${s.itemName}`,
+          meta: {
+            itemId: s.itemId,
+            itemType: s.itemType,
+            userName: s.userName,
+            seriesName: s.seriesName,
+            artists: s.artists,
+            album: s.album,
+            indexNumber: s.indexNumber,
+            parentIndexNumber: s.parentIndexNumber,
+          },
+        })
+      }
+    }
+  }
+
+  if (settings.stream_end) {
+    for (const [key, prev] of previousMap) {
+      if (!currentMap.has(key)) {
+        const itemName = key.split(':')[1] || 'unknown'
+        events.push({
+          eventType: 'stream_end',
+          title: `Stream Ended`,
+          message: `Playback of ${itemName} ended`,
+          meta: {
+            itemId: prev.itemId,
+            itemType: prev.itemType,
+            userName: prev.userName,
+            seriesName: prev.seriesName,
+            artists: prev.artists,
+            album: prev.album,
+            indexNumber: prev.indexNumber,
+            parentIndexNumber: prev.parentIndexNumber,
+          },
+        })
+      }
+    }
+  }
+
+  const transcodeCount = currentSessions.filter((s) => s.isTranscoding).length
+  if (settings.transcode_load && transcodeCount >= settings.threshold_transcode) {
+    events.push({
+      eventType: 'transcode_load',
+      title: `High Transcode Load`,
+      message: `${transcodeCount} active transcode sessions (threshold: ${settings.threshold_transcode})`,
+    })
+  }
+
+  if (currentSessions.length >= settings.threshold_concurrent) {
+    events.push({
+      eventType: 'concurrent_threshold',
+      title: `Concurrent Stream Alert`,
+      message: `${currentSessions.length} concurrent streams (threshold: ${settings.threshold_concurrent})`,
+    })
+  }
+
+  previousSessionsCache.set(userId, currentMap)
+  return events
+}
+
+async function sendWebhook(platform: string, url: string, event: SessionEvent): Promise<boolean> {
+  try {
+    let body: string
+    let headers: Record<string, string> = { 'Content-Type': 'application/json' }
+
+    if (platform === 'discord') {
+      body = JSON.stringify({
+        embeds: [{
+          title: event.title,
+          description: event.message,
+          color: event.eventType === 'stream_start' ? 0x22c55e : event.eventType === 'stream_end' ? 0x6366f1 : 0xef4444,
+          timestamp: new Date().toISOString(),
+          footer: { text: 'FinScope Notification' },
+        }],
+      })
+    } else if (platform === 'telegram') {
+      const chatId = new URL(url).searchParams.get('chat_id') || ''
+      const botUrl = url.split('?')[0]
+      body = JSON.stringify({
+        chat_id: chatId,
+        text: `*${event.title}*\n${event.message}`,
+        parse_mode: 'Markdown',
+      })
+      url = botUrl
+    } else {
+      body = JSON.stringify({
+        blocks: [
+          { type: 'header', text: { type: 'plain_text', text: event.title } },
+          { type: 'section', text: { type: 'mrkdwn', text: event.message } },
+        ],
+      })
+    }
+
+    const resp = await fetch(url, { method: 'POST', headers, body })
+    return resp.ok
+  } catch {
+    return false
+  }
+}
+
+function processNotificationEvents(userId: string, events: SessionEvent[]) {
+  if (events.length === 0) return
+
+  const insertLog = db.prepare(
+    `INSERT INTO notification_log (user_id, event_type, title, message, metadata) VALUES (?, ?, ?, ?, ?)`,
+  )
+
+  const webhooks = db.prepare(
+    `SELECT platform, webhook_url FROM webhook_configs WHERE user_id = ? AND is_active = 1`,
+  ).all(userId) as { platform: string; webhook_url: string }[]
+
+  for (const event of events) {
+    insertLog.run(userId, event.eventType, event.title, event.message, event.meta ? JSON.stringify(event.meta) : null)
+    pushSSE(userId, event)
+    for (const wh of webhooks) {
+      sendWebhook(wh.platform, wh.webhook_url, event)
+    }
+  }
+}
 
 app.use(cors())
 app.use(express.json())
@@ -574,7 +790,10 @@ app.get('/api/jellyfin/users/:userId/most-played', requireAuth, async (req, res)
       includeItemTypes: [BaseItemKind.Movie, BaseItemKind.Series, BaseItemKind.Audio],
       enableUserData: true,
     })
-    res.json(data.Items || [])
+    res.json((data.Items || []).map((item) => ({
+      ...item,
+      PlayCount: item.UserData?.PlayCount ?? 0,
+    })))
   } catch (err) {
     res.status(jellyfinErrorStatus(err)).json({ error: jellyfinErrorMessage(err) })
   }
@@ -838,6 +1057,14 @@ app.post('/api/history/track-sessions', requireAuth, (req, res) => {
       itemName: string
       itemType: string
       client: string
+      positionTicks?: number
+      runtimeTicks?: number
+      isTranscoding?: boolean
+      seriesName?: string
+      artists?: string[]
+      album?: string
+      indexNumber?: number
+      parentIndexNumber?: number
     }[]
   }
 
@@ -851,23 +1078,59 @@ app.post('/api/history/track-sessions', requireAuth, (req, res) => {
   const hourKey = now.slice(0, 13) + ':00:00.000Z'
 
   const insertStmt = db.prepare(`
-    INSERT OR IGNORE INTO playback_history (server_url, user_id, item_id, item_name, item_type, date_played)
-    VALUES (?, ?, ?, ?, ?, ?)
+    INSERT OR IGNORE INTO playback_history (server_url, user_id, item_id, item_name, item_type, date_played, position_ticks, runtime_ticks)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `)
+
+  const updateTicksStmt = db.prepare(`
+    UPDATE playback_history SET position_ticks = ?, runtime_ticks = ?
+    WHERE server_url = ? AND user_id = ? AND item_id = ? AND date_played = ? AND (position_ticks < ? OR position_ticks = 0)
   `)
 
   let tracked = 0
   const insertBatch = db.transaction(() => {
     for (const s of sessions) {
       try {
-        insertStmt.run(baseUrl, s.userId, s.itemId, s.itemName, s.itemType, hourKey)
+        const pt = s.positionTicks || 0
+        const rt = s.runtimeTicks || 0
+        insertStmt.run(baseUrl, s.userId, s.itemId, s.itemName, s.itemType, hourKey, pt, rt)
         tracked++
       } catch {
-        // duplicate
+        if (s.positionTicks) {
+          updateTicksStmt.run(s.positionTicks, s.runtimeTicks || 0, baseUrl, s.userId, s.itemId, hourKey, s.positionTicks)
+        }
       }
     }
   })
 
   insertBatch()
+
+  const transcodeCount = sessions.filter((s) => s.isTranscoding).length
+  const estimatedMbps = sessions.length * 8 + transcodeCount * 12
+  db.prepare(
+    `INSERT INTO bandwidth_snapshots (server_url, active_sessions, transcode_sessions, estimated_mbps) VALUES (?, ?, ?, ?)`,
+  ).run(baseUrl, sessions.length, transcodeCount, estimatedMbps)
+
+  const settings = db.prepare(
+    `SELECT stream_start, stream_end, transcode_load, threshold_concurrent, threshold_transcode FROM notification_settings WHERE user_id = ?`,
+  ).get(req.user!.id) as { stream_start: number; stream_end: number; transcode_load: number; threshold_concurrent: number; threshold_transcode: number } | undefined
+
+  if (settings) {
+    const events = detectSessionEvents(req.user!.id, sessions.map((s) => ({
+      userId: s.userId,
+      userName: s.userName,
+      itemId: s.itemId,
+      itemName: s.itemName,
+      itemType: s.itemType,
+      isTranscoding: s.isTranscoding,
+      seriesName: s.seriesName,
+      artists: s.artists,
+      album: s.album,
+      indexNumber: s.indexNumber,
+      parentIndexNumber: s.parentIndexNumber,
+    })), settings)
+    processNotificationEvents(req.user!.id, events)
+  }
 
   if (tracked > 0) {
     console.log(`[SessionTrack] Recorded ${tracked} playback events`)
@@ -971,7 +1234,9 @@ app.get('/api/jellyfin/user-image', async (req, res) => {
 
   try {
     const url = `${config.server_url}/Users/${jellyfinUserId}/Images/Primary?fillHeight=200&fillWidth=200&quality=90`
-    const response = await fetch(url)
+    const response = await fetch(url, {
+      headers: { 'X-Emby-Token': config.api_key },
+    })
 
     if (!response.ok) { res.status(response.status).end(); return }
 
@@ -1057,6 +1322,510 @@ app.get('/api/genres', requireAuth, async (req, res) => {
   } catch {
     res.json({ genres: [] })
   }
+})
+
+app.get('/api/notifications/settings', requireAuth, (req, res) => {
+  const row = db.prepare(
+    `SELECT stream_start, stream_end, transcode_load, server_error, threshold_concurrent, threshold_transcode FROM notification_settings WHERE user_id = ?`,
+  ).get(req.user!.id) as {
+    stream_start: number; stream_end: number; transcode_load: number; server_error: number
+    threshold_concurrent: number; threshold_transcode: number
+  } | undefined
+
+  if (!row) {
+    res.json({
+      streamStart: true, streamEnd: true, transcodeLoad: false, serverError: true,
+      thresholdConcurrent: 5, thresholdTranscode: 3,
+    })
+    return
+  }
+
+  res.json({
+    streamStart: !!row.stream_start,
+    streamEnd: !!row.stream_end,
+    transcodeLoad: !!row.transcode_load,
+    serverError: !!row.server_error,
+    thresholdConcurrent: row.threshold_concurrent,
+    thresholdTranscode: row.threshold_transcode,
+  })
+})
+
+app.put('/api/notifications/settings', requireAuth, (req, res) => {
+  const { streamStart, streamEnd, transcodeLoad, serverError, thresholdConcurrent, thresholdTranscode } = req.body as {
+    streamStart?: boolean; streamEnd?: boolean; transcodeLoad?: boolean; serverError?: boolean
+    thresholdConcurrent?: number; thresholdTranscode?: number
+  }
+
+  db.prepare(`
+    INSERT INTO notification_settings (user_id, stream_start, stream_end, transcode_load, server_error, threshold_concurrent, threshold_transcode)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(user_id) DO UPDATE SET
+      stream_start = excluded.stream_start,
+      stream_end = excluded.stream_end,
+      transcode_load = excluded.transcode_load,
+      server_error = excluded.server_error,
+      threshold_concurrent = excluded.threshold_concurrent,
+      threshold_transcode = excluded.threshold_transcode
+  `).run(
+    req.user!.id,
+    streamStart ? 1 : 0,
+    streamEnd ? 1 : 0,
+    transcodeLoad ? 1 : 0,
+    serverError ? 1 : 0,
+    thresholdConcurrent ?? 5,
+    thresholdTranscode ?? 3,
+  )
+
+  res.json({ success: true })
+})
+
+app.get('/api/notifications/log', requireAuth, (req, res) => {
+  const limit = Math.min(parseInt(req.query.limit as string) || 50, 200)
+  const offset = parseInt(req.query.offset as string) || 0
+
+  const rows = db.prepare(
+    `SELECT id, event_type, title, message, is_read, metadata, created_at FROM notification_log WHERE user_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?`,
+  ).all(req.user!.id, limit, offset) as {
+    id: number; event_type: string; title: string; message: string; is_read: number; metadata: string | null; created_at: string
+  }[]
+
+  res.json(rows.map((r) => ({
+    id: r.id,
+    eventType: r.event_type,
+    title: r.title,
+    message: r.message,
+    isRead: !!r.is_read,
+    meta: r.metadata ? JSON.parse(r.metadata) : undefined,
+    createdAt: r.created_at,
+  })))
+})
+
+app.post('/api/notifications/read', requireAuth, (req, res) => {
+  const { ids } = req.body as { ids?: number[] }
+  if (ids && ids.length > 0) {
+    const placeholders = ids.map(() => '?').join(',')
+    db.prepare(`UPDATE notification_log SET is_read = 1 WHERE user_id = ? AND id IN (${placeholders})`).run(req.user!.id, ...ids)
+  } else {
+    db.prepare(`UPDATE notification_log SET is_read = 1 WHERE user_id = ?`).run(req.user!.id)
+  }
+  res.json({ success: true })
+})
+
+app.get('/api/notifications/unread-count', requireAuth, (req, res) => {
+  const row = db.prepare(
+    `SELECT COUNT(*) as cnt FROM notification_log WHERE user_id = ? AND is_read = 0`,
+  ).get(req.user!.id) as { cnt: number }
+  res.json({ count: row.cnt })
+})
+
+app.get('/api/notifications/latest', requireAuth, (req, res) => {
+  const since = req.query.since as string
+  if (!since) { res.json([]); return }
+  const rows = db.prepare(
+    `SELECT id, event_type, title, message, is_read, metadata, created_at FROM notification_log WHERE user_id = ? AND created_at > ? ORDER BY created_at DESC LIMIT 10`,
+  ).all(req.user!.id, since) as {
+    id: number; event_type: string; title: string; message: string; is_read: number; metadata: string | null; created_at: string
+  }[]
+  res.json(rows.map((r) => ({
+    id: r.id,
+    eventType: r.event_type,
+    title: r.title,
+    message: r.message,
+    isRead: !!r.is_read,
+    meta: r.metadata ? JSON.parse(r.metadata) : undefined,
+    createdAt: r.created_at,
+  })))
+})
+
+app.delete('/api/notifications', requireAuth, (req, res) => {
+  try {
+    db.prepare(`DELETE FROM notification_log WHERE user_id = ?`).run(req.user!.id)
+    res.json({ success: true })
+  } catch (e) {
+    console.error('DELETE /api/notifications error:', e)
+    res.status(500).json({ error: 'Failed to delete notifications' })
+  }
+})
+
+app.delete('/api/notifications/:id', requireAuth, (req, res) => {
+  try {
+    db.prepare(`DELETE FROM notification_log WHERE user_id = ? AND id = ?`).run(req.user!.id, req.params.id)
+    res.json({ success: true })
+  } catch (e) {
+    console.error('DELETE /api/notifications/:id error:', e)
+    res.status(500).json({ error: 'Failed to delete notification' })
+  }
+})
+
+app.get('/api/notifications/stream', (req, res) => {
+  const qToken = req.query.token as string | undefined
+  const authHeader = req.headers.authorization
+  const rawToken = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : qToken
+  if (!rawToken) { res.status(401).end(); return }
+
+  const session = db.prepare(
+    'SELECT s.user_id, s.expires_at FROM sessions s WHERE s.token = ?',
+  ).get(rawToken) as { user_id: string; expires_at: string } | undefined
+  if (!session || new Date(session.expires_at) < new Date()) { res.status(401).end(); return }
+
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    Connection: 'keep-alive',
+    'X-Accel-Buffering': 'no',
+  })
+  res.write(':ok\n\n')
+
+  const userId = session.user_id
+  if (!sseClients.has(userId)) sseClients.set(userId, new Set())
+  sseClients.get(userId)!.add(res)
+
+  const keepAlive = setInterval(() => {
+    try { res.write(':ping\n\n') } catch { /* noop */ }
+  }, 30000)
+
+  req.on('close', () => {
+    clearInterval(keepAlive)
+    sseClients.get(userId)?.delete(res)
+  })
+})
+
+app.get('/api/jellyfin/stream', (req, res) => {
+  const qToken = req.query.token as string | undefined
+  const authHeader = req.headers.authorization
+  const rawToken = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : qToken
+  if (!rawToken) { res.status(401).end(); return }
+
+  const session = db.prepare(
+    'SELECT s.user_id, s.expires_at FROM sessions s WHERE s.token = ?',
+  ).get(rawToken) as { user_id: string; expires_at: string } | undefined
+  if (!session || new Date(session.expires_at) < new Date()) { res.status(401).end(); return }
+
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    Connection: 'keep-alive',
+    'X-Accel-Buffering': 'no',
+  })
+  res.write(':ok\n\n')
+
+  const userId = session.user_id
+  if (!sessionStreamClients.has(userId)) sessionStreamClients.set(userId, new Set())
+  sessionStreamClients.get(userId)!.add(res)
+
+  const cached = sessionStreamCache.get(userId)
+  if (cached) {
+    res.write(`data: ${JSON.stringify({ type: 'sessions', data: JSON.parse(cached) })}\n\n`)
+  }
+
+  const keepAlive = setInterval(() => {
+    try { res.write(':ping\n\n') } catch { /* noop */ }
+  }, 25000)
+
+  req.on('close', () => {
+    clearInterval(keepAlive)
+    sessionStreamClients.get(userId)?.delete(res)
+  })
+})
+
+app.post('/api/jellyfin/sessions/:sessionId/playstate', requireAuth, async (req, res) => {
+  const ctx = getApiForUser(req.user!.id)
+  if (!ctx) { res.status(400).json({ error: 'No Jellyfin server configured' }); return }
+
+  const { sessionId } = req.params
+  const { command } = req.body as { command?: string }
+
+  const allowed = ['Pause', 'Unpause', 'Stop', 'NextTrack', 'PreviousTrack', 'PlayPause']
+  if (!command || !allowed.includes(command)) {
+    res.status(400).json({ error: 'Invalid command' })
+    return
+  }
+
+  const serverUrl = ctx.config.server_url.replace(/\/$/, '')
+  const controllingUserId = ctx.config.jellyfin_user_id
+  const url = `${serverUrl}/Sessions/${encodeURIComponent(sessionId)}/Playing/${command}?controllingUserId=${encodeURIComponent(controllingUserId)}`
+
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'X-Emby-Token': ctx.config.api_key,
+        'Content-Type': 'application/json',
+      },
+    })
+    if (!response.ok) {
+      const text = await response.text().catch(() => '')
+      res.status(response.status).json({ error: text || 'Jellyfin rejected the command' })
+      return
+    }
+    res.json({ ok: true })
+  } catch (err) {
+    res.status(500).json({ error: String(err) })
+  }
+})
+
+app.get('/api/jellyfin/activity', requireAuth, async (req, res) => {
+  const ctx = getApiForUser(req.user!.id)
+  if (!ctx) { res.status(400).json({ error: 'No Jellyfin server configured' }); return }
+
+  const limit = parseInt(req.query.limit as string) || 50
+  const startIndex = parseInt(req.query.startIndex as string) || 0
+
+  try {
+    const { data } = await getActivityLogApi(ctx.api).getLogEntries({ startIndex, limit })
+    res.json(data.Items || [])
+  } catch (err) {
+    res.status(jellyfinErrorStatus(err)).json({ error: jellyfinErrorMessage(err) })
+  }
+})
+
+app.get('/api/webhooks', requireAuth, (req, res) => {
+  const rows = db.prepare(
+    `SELECT id, name, platform, webhook_url, is_active, created_at FROM webhook_configs WHERE user_id = ? ORDER BY created_at DESC`,
+  ).all(req.user!.id) as {
+    id: number; name: string; platform: string; webhook_url: string; is_active: number; created_at: string
+  }[]
+
+  res.json(rows.map((r) => ({
+    id: r.id,
+    name: r.name,
+    platform: r.platform,
+    webhookUrl: r.webhook_url,
+    isActive: !!r.is_active,
+  })))
+})
+
+app.post('/api/webhooks', requireAuth, (req, res) => {
+  const { name, platform, webhookUrl } = req.body as { name?: string; platform?: string; webhookUrl?: string }
+
+  if (!name || !platform || !webhookUrl) {
+    res.status(400).json({ error: 'Missing name, platform, or webhookUrl' })
+    return
+  }
+
+  if (!['discord', 'telegram', 'slack'].includes(platform)) {
+    res.status(400).json({ error: 'Invalid platform' })
+    return
+  }
+
+  const result = db.prepare(
+    `INSERT INTO webhook_configs (user_id, name, platform, webhook_url) VALUES (?, ?, ?, ?)`,
+  ).run(req.user!.id, name, platform, webhookUrl)
+
+  res.status(201).json({
+    id: result.lastInsertRowid,
+    name,
+    platform,
+    webhookUrl,
+    isActive: true,
+  })
+})
+
+app.put('/api/webhooks/:id', requireAuth, (req, res) => {
+  const { id } = req.params
+  const { name, platform, webhookUrl, isActive } = req.body as {
+    name?: string; platform?: string; webhookUrl?: string; isActive?: boolean
+  }
+
+  const existing = db.prepare(`SELECT id FROM webhook_configs WHERE id = ? AND user_id = ?`).get(id, req.user!.id)
+  if (!existing) {
+    res.status(404).json({ error: 'Webhook not found' })
+    return
+  }
+
+  if (name !== undefined) db.prepare(`UPDATE webhook_configs SET name = ? WHERE id = ?`).run(name, id)
+  if (platform !== undefined) db.prepare(`UPDATE webhook_configs SET platform = ? WHERE id = ?`).run(platform, id)
+  if (webhookUrl !== undefined) db.prepare(`UPDATE webhook_configs SET webhook_url = ? WHERE id = ?`).run(webhookUrl, id)
+  if (isActive !== undefined) db.prepare(`UPDATE webhook_configs SET is_active = ? WHERE id = ?`).run(isActive ? 1 : 0, id)
+
+  res.json({ success: true })
+})
+
+app.delete('/api/webhooks/:id', requireAuth, (req, res) => {
+  const { id } = req.params
+  const result = db.prepare(`DELETE FROM webhook_configs WHERE id = ? AND user_id = ?`).run(id, req.user!.id)
+  if (result.changes === 0) {
+    res.status(404).json({ error: 'Webhook not found' })
+    return
+  }
+  res.json({ success: true })
+})
+
+app.post('/api/webhooks/:id/test', requireAuth, async (req, res) => {
+  const { id } = req.params
+  const wh = db.prepare(`SELECT platform, webhook_url FROM webhook_configs WHERE id = ? AND user_id = ?`).get(id, req.user!.id) as {
+    platform: string; webhook_url: string
+  } | undefined
+
+  if (!wh) {
+    res.status(404).json({ error: 'Webhook not found' })
+    return
+  }
+
+  const success = await sendWebhook(wh.platform, wh.webhook_url, {
+    eventType: 'stream_start',
+    title: 'FinScope Test',
+    message: 'This is a test notification from FinScope.',
+  })
+
+  res.json({ success })
+})
+
+app.get('/api/history/analytics/trends', requireAuth, (req, res) => {
+  const config = getJellyfinConfig(req.user!.id)
+  if (!config) { res.json([]); return }
+
+  const period = (req.query.period as string) || 'weekly'
+  const now = new Date()
+  const daysBack = period === 'monthly' ? 60 : 14
+
+  const rows = db.prepare(
+    `SELECT date_played FROM playback_history WHERE server_url = ? AND date_played >= datetime('now', ?)`,
+  ).all(config.server_url, `-${daysBack} days`) as { date_played: string }[]
+
+  const dayMap: Record<string, number> = {}
+  for (const row of rows) {
+    const d = new Date(row.date_played)
+    if (isNaN(d.getTime())) continue
+    const key = d.toISOString().split('T')[0]
+    dayMap[key] = (dayMap[key] || 0) + 1
+  }
+
+  const halfDays = Math.floor(daysBack / 2)
+  const result: { date: string; current: number; previous: number }[] = []
+
+  for (let i = halfDays - 1; i >= 0; i--) {
+    const currentDate = new Date(now)
+    currentDate.setDate(currentDate.getDate() - i)
+    const currentKey = currentDate.toISOString().split('T')[0]
+
+    const prevDate = new Date(now)
+    prevDate.setDate(prevDate.getDate() - i - halfDays)
+    const prevKey = prevDate.toISOString().split('T')[0]
+
+    result.push({
+      date: currentKey,
+      current: dayMap[currentKey] || 0,
+      previous: dayMap[prevKey] || 0,
+    })
+  }
+
+  res.json(result)
+})
+
+app.get('/api/history/analytics/popular', requireAuth, (req, res) => {
+  const config = getJellyfinConfig(req.user!.id)
+  if (!config) { res.json([]); return }
+
+  const rows = db.prepare(`
+    SELECT item_id, item_name, item_type, COUNT(*) as play_count
+    FROM playback_history
+    WHERE server_url = ? AND date_played >= datetime('now', '-7 days')
+    GROUP BY item_id
+    ORDER BY play_count DESC
+    LIMIT 10
+  `).all(config.server_url) as { item_id: string; item_name: string; item_type: string; play_count: number }[]
+
+  res.json(rows.map((r) => ({
+    itemId: r.item_id,
+    itemName: r.item_name,
+    itemType: r.item_type,
+    playCount: r.play_count,
+  })))
+})
+
+app.get('/api/history/analytics/user-comparison', requireAuth, async (req, res) => {
+  const ctx = getApiForUser(req.user!.id)
+  if (!ctx) { res.json([]); return }
+
+  const rows = db.prepare(`
+    SELECT user_id, COUNT(*) as play_count
+    FROM playback_history
+    WHERE server_url = ?
+    GROUP BY user_id
+    ORDER BY play_count DESC
+    LIMIT 20
+  `).all(ctx.config.server_url) as { user_id: string; play_count: number }[]
+
+  let jfUsers: { Id?: string; Name?: string; PrimaryImageTag?: string; HasPrimaryImage?: boolean }[] = []
+  try {
+    const { data } = await getUserApi(ctx.api).getUsers()
+    jfUsers = data
+  } catch { /* noop */ }
+
+  const userMap = new Map<string, { name: string; hasImage: boolean }>()
+  for (const u of jfUsers) {
+    if (u.Id) userMap.set(u.Id, { name: u.Name || u.Id, hasImage: !!(u.PrimaryImageTag || u.HasPrimaryImage) })
+  }
+
+  res.json(rows.map((r) => {
+    const resolved = userMap.get(r.user_id)
+    return {
+      userId: r.user_id,
+      userName: resolved?.name || r.user_id,
+      hasImage: resolved?.hasImage ?? false,
+      playCount: r.play_count,
+    }
+  }))
+})
+
+app.get('/api/history/analytics/completion-rates', requireAuth, (req, res) => {
+  const config = getJellyfinConfig(req.user!.id)
+  if (!config) { res.json([]); return }
+
+  const rows = db.prepare(`
+    SELECT item_id, item_name, item_type, position_ticks, runtime_ticks
+    FROM playback_history
+    WHERE server_url = ? AND runtime_ticks > 0
+    ORDER BY date_played DESC
+    LIMIT 50
+  `).all(config.server_url) as { item_id: string; item_name: string; item_type: string; position_ticks: number; runtime_ticks: number }[]
+
+  const itemMap = new Map<string, { itemName: string; itemType: string; maxRate: number }>()
+  for (const r of rows) {
+    const rate = Math.min(1, r.position_ticks / r.runtime_ticks)
+    const existing = itemMap.get(r.item_id)
+    if (!existing || rate > existing.maxRate) {
+      itemMap.set(r.item_id, { itemName: r.item_name, itemType: r.item_type, maxRate: rate })
+    }
+  }
+
+  const result = Array.from(itemMap.entries())
+    .map(([itemId, v]) => ({
+      itemId,
+      itemName: v.itemName,
+      itemType: v.itemType,
+      completionRate: Math.round(v.maxRate * 100),
+    }))
+    .sort((a, b) => b.completionRate - a.completionRate)
+    .slice(0, 20)
+
+  res.json(result)
+})
+
+app.get('/api/history/analytics/bandwidth', requireAuth, (req, res) => {
+  const config = getJellyfinConfig(req.user!.id)
+  if (!config) { res.json([]); return }
+
+  const range = (req.query.range as string) || '24h'
+  const rangeMap: Record<string, string> = { '24h': '-1 day', '7d': '-7 days', '30d': '-30 days' }
+  const sqlRange = rangeMap[range] || '-1 day'
+
+  const rows = db.prepare(`
+    SELECT timestamp, active_sessions, transcode_sessions, estimated_mbps
+    FROM bandwidth_snapshots
+    WHERE server_url = ? AND timestamp >= datetime('now', ?)
+    ORDER BY timestamp ASC
+  `).all(config.server_url, sqlRange) as {
+    timestamp: string; active_sessions: number; transcode_sessions: number; estimated_mbps: number
+  }[]
+
+  res.json(rows.map((r) => ({
+    timestamp: r.timestamp,
+    activeSessions: r.active_sessions,
+    transcodeSessions: r.transcode_sessions,
+    estimatedMbps: r.estimated_mbps,
+  })))
 })
 
 app.get('/api/health', (_req, res) => {

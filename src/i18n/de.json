@@ -12,6 +12,7 @@
     "users": "Users",
     "library": "Library",
     "pulse": "Pulse",
+    "activity": "Aktivität",
     "settings": "Settings"
   },
   "auth": {
@@ -123,7 +124,21 @@
     "allTypes": "Alle Typen",
     "filteredCount": "{{shown}} von {{total}}",
     "noResults": "Keine Ergebnisse",
-    "resetFilter": "Filter zurücksetzen"
+    "resetFilter": "Filter zurücksetzen",
+    "control": {
+      "pause": "Pausieren",
+      "resume": "Fortsetzen",
+      "stop": "Stoppen",
+      "next": "Nächster Track"
+    }
+  },
+  "activity": {
+    "title": "Aktivitätslog",
+    "subtitle": "Alle Server-Ereignisse in Echtzeit",
+    "refresh": "Aktualisieren",
+    "empty": "Noch keine Aktivitäten vorhanden.",
+    "loadMore": "Mehr laden",
+    "demoUnavailable": "Aktivitätslog ist im Demo-Modus nicht verfügbar."
   },
   "analytics": {
     "title": "Deep Analytics",
@@ -149,7 +164,19 @@
     "more": "Viel",
     "noDataTitle": "Noch keine Analytics-Daten",
     "noDataSub": "Daten werden automatisch bei Wiedergaben erfasst. Schau nach deinen ersten Streams nochmal vorbei.",
-    "noClients": "Noch keine aktiven Clients erkannt."
+    "noClients": "Noch keine aktiven Clients erkannt.",
+    "trends": "Aktivitätstrends",
+    "weekly": "Wöchentlich",
+    "monthly": "Monatlich",
+    "currentPeriod": "Aktueller Zeitraum",
+    "previousPeriod": "Vorheriger Zeitraum",
+    "popularThisWeek": "Beliebt diese Woche",
+    "plays": "Plays",
+    "userComparison": "Nutzer-Vergleich",
+    "completionRates": "Abschlussraten",
+    "bandwidth": "Bandbreiten-Schätzung",
+    "peakBandwidth": "Spitze",
+    "dataPoints": "Datenpunkte"
   },
   "users": {
     "playedMedia": "Gespielte Medien",
@@ -223,6 +250,32 @@
     "tracks": "{{count}} Tracks",
     "viewArtist": "Künstler anzeigen",
     "viewAlbum": "Album anzeigen"
+  },
+  "notifications": {
+    "title": "Benachrichtigungen",
+    "alerts": "Alert-Einstellungen",
+    "empty": "Noch keine Benachrichtigungen",
+    "streamStart": "Stream gestartet",
+    "streamStartDesc": "Benachrichtigung wenn ein User einen Stream startet",
+    "streamEnd": "Stream beendet",
+    "streamEndDesc": "Benachrichtigung wenn ein Stream endet",
+    "transcodeLoad": "Transcode-Überlastung",
+    "transcodeLoadDesc": "Alarm bei Überschreitung des Transcode-Schwellwerts",
+    "serverError": "Server-Fehler",
+    "serverErrorDesc": "Alarm bei Server-Verbindungsproblemen",
+    "thresholds": "Schwellwerte",
+    "concurrentStreams": "Gleichzeitige Streams",
+    "transcodeSessions": "Transcode-Sessions",
+    "webhookName": "Webhook-Name",
+    "webhookUrl": "Webhook-URL",
+    "addWebhook": "Webhook hinzufügen",
+    "noWebhooks": "Noch keine Webhooks konfiguriert.",
+    "webhookCreated": "Webhook erstellt",
+    "testSent": "Test-Benachrichtigung gesendet",
+    "testFailed": "Test-Benachrichtigung fehlgeschlagen",
+    "markAllRead": "Alle als gelesen markieren",
+    "deleteAll": "Alle löschen",
+    "confirmDeleteAll": "Alle Benachrichtigungen löschen?"
   },
   "toast": {
     "profileSaved": "Profil gespeichert",

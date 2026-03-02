@@ -5,6 +5,7 @@ import {
   Users,
   Database,
   Zap,
+  ScrollText,
   Settings,
   Power,
 } from 'lucide-react'
@@ -19,6 +20,7 @@ const NAV_ITEMS: { path: string; icon: typeof Home; labelKey: string }[] = [
   { path: '/users', icon: Users, labelKey: 'nav.users' },
   { path: '/library', icon: Database, labelKey: 'nav.library' },
   { path: '/pulse', icon: Zap, labelKey: 'nav.pulse' },
+  { path: '/activity', icon: ScrollText, labelKey: 'nav.activity' },
   { path: '/settings', icon: Settings, labelKey: 'nav.settings' },
 ]
 
@@ -30,7 +32,7 @@ export default function BottomNav() {
 
   return (
     <div className="fixed bottom-4 sm:bottom-6 md:bottom-8 left-1/2 -translate-x-1/2 z-50 max-w-[calc(100vw-2rem)]">
-      <nav className="flex items-center gap-0.5 sm:gap-1 md:gap-1.5 bg-white/[0.05] backdrop-blur-[50px] border border-white/[0.15] border-t-white/[0.25] rounded-full p-1.5 sm:p-2 shadow-[0_20px_40px_-10px_rgba(0,0,0,0.5),inset_0_1px_1px_rgba(255,255,255,0.1)]">
+      <nav data-bottom-nav className="flex items-center gap-0.5 sm:gap-1 md:gap-1.5 bg-white/[0.05] backdrop-blur-[50px] border border-white/[0.15] border-t-white/[0.25] rounded-full p-1.5 sm:p-2 shadow-[0_20px_40px_-10px_rgba(0,0,0,0.5),inset_0_1px_1px_rgba(255,255,255,0.1)]">
         {NAV_ITEMS.map((nav) => {
           const isActive = location.pathname === nav.path
           return (

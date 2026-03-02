@@ -3,6 +3,8 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { useAppStore } from './store/useAppStore'
 import { useUIStore } from './store/useUIStore'
 import { useJellyfinPolling } from './hooks/useJellyfinPolling'
+import { useJellyfinStream } from './hooks/useJellyfinStream'
+import { useNotificationStream } from './hooks/useNotificationStream'
 import { useTickTimer } from './hooks/useTickTimer'
 import { useHeroRotation } from './hooks/useHeroRotation'
 
@@ -18,6 +20,7 @@ import AnalyticsView from './components/views/AnalyticsView'
 import UsersView from './components/views/UsersView'
 import LibraryView from './components/views/LibraryView'
 import PulseView from './components/views/PulseView'
+import ActivityView from './components/views/ActivityView'
 import SettingsView from './components/views/SettingsView'
 import ArtistDetailView from './components/views/ArtistDetailView'
 import AlbumDetailView from './components/views/AlbumDetailView'
@@ -30,6 +33,8 @@ function Dashboard() {
   const { isDemoMode } = useAppStore()
 
   useJellyfinPolling()
+  useJellyfinStream()
+  useNotificationStream()
   useTickTimer()
   useHeroRotation()
 
@@ -51,6 +56,7 @@ function Dashboard() {
             <Route path="/users" element={<div className="max-w-7xl mx-auto w-full px-6 sm:px-8 lg:px-10 pt-28 sm:pt-32"><UsersView /></div>} />
             <Route path="/library" element={<div className="max-w-7xl mx-auto w-full px-6 sm:px-8 lg:px-10 pt-28 sm:pt-32"><LibraryView /></div>} />
             <Route path="/pulse" element={<div className="max-w-7xl mx-auto w-full px-6 sm:px-8 lg:px-10 pt-28 sm:pt-32"><PulseView /></div>} />
+            <Route path="/activity" element={<div className="max-w-7xl mx-auto w-full px-6 sm:px-8 lg:px-10 pt-28 sm:pt-32 pb-10"><ActivityView /></div>} />
             <Route path="/settings" element={<div className="max-w-7xl mx-auto w-full px-6 sm:px-8 lg:px-10 pt-28 sm:pt-32"><SettingsView /></div>} />
             <Route path="/artist/:id" element={<ArtistDetailView />} />
             <Route path="/album/:id" element={<div className="max-w-7xl mx-auto w-full px-6 sm:px-8 lg:px-10 pt-28 sm:pt-32"><AlbumDetailView /></div>} />

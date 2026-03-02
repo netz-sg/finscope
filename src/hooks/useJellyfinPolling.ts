@@ -1,7 +1,9 @@
 import { useEffect, useRef } from 'react'
 import { JellyfinAPI } from '../api/jellyfin'
+import { NotificationsAPI } from '../api/notifications'
 import { useAppStore } from '../store/useAppStore'
 import { useMediaStore } from '../store/useMediaStore'
+import { useNotificationStore } from '../store/useNotificationStore'
 import {
   DEMO_SESSIONS,
   DEMO_USERS,
@@ -43,6 +45,7 @@ export const useJellyfinPolling = () => {
     setAnalyticsData, setGenreData, setPulseStats,
     setNews, setHeroItems,
   } = useMediaStore()
+  const { setUnreadCount } = useNotificationStore()
 
   const historySynced = useRef(false)
   const heroFetched = useRef(false)
@@ -86,7 +89,6 @@ export const useJellyfinPolling = () => {
           JellyfinAPI.getCounts(config.url, config.apiKey),
         ])
 
-        setSessions(activeSessions)
         if (libCounts) setCounts(libCounts)
 
         if (allUsers.length > 0) {
@@ -116,9 +118,19 @@ export const useJellyfinPolling = () => {
                 itemName: s.NowPlayingItem.Name,
                 itemType: s.NowPlayingItem.Type,
                 client: s.Client || s.DeviceName,
+                positionTicks: s.PlayState?.PositionTicks || 0,
+                runtimeTicks: s.NowPlayingItem?.RunTimeTicks || 0,
+                isTranscoding: !!s.TranscodingInfo,
+                seriesName: s.NowPlayingItem.SeriesName,
+                artists: s.NowPlayingItem.Artists,
+                album: s.NowPlayingItem.Album,
+                indexNumber: s.NowPlayingItem.IndexNumber,
+                parentIndexNumber: s.NowPlayingItem.ParentIndexNumber,
               }))
             JellyfinAPI.trackSessions(trackable)
           }
+
+          NotificationsAPI.getUnreadCount().then(setUnreadCount).catch(() => {})
 
           analyticsRefreshCounter.current++
           if (dbAnalytics.current && analyticsRefreshCounter.current % 6 === 0) {

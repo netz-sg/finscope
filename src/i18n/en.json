@@ -12,6 +12,7 @@
     "users": "Users",
     "library": "Library",
     "pulse": "Pulse",
+    "activity": "Activity",
     "settings": "Settings"
   },
   "auth": {
@@ -123,7 +124,21 @@
     "allTypes": "All Types",
     "filteredCount": "{{shown}} of {{total}}",
     "noResults": "No results",
-    "resetFilter": "Reset filters"
+    "resetFilter": "Reset filters",
+    "control": {
+      "pause": "Pause",
+      "resume": "Resume",
+      "stop": "Stop",
+      "next": "Next Track"
+    }
+  },
+  "activity": {
+    "title": "Activity Log",
+    "subtitle": "All server events in real time",
+    "refresh": "Refresh",
+    "empty": "No activity yet.",
+    "loadMore": "Load more",
+    "demoUnavailable": "Activity log is not available in demo mode."
   },
   "analytics": {
     "title": "Deep Analytics",
@@ -149,7 +164,19 @@
     "more": "More",
     "noDataTitle": "No Analytics Data Yet",
     "noDataSub": "Data is collected automatically as playbacks occur. Check back after your first streams.",
-    "noClients": "No active clients detected yet."
+    "noClients": "No active clients detected yet.",
+    "trends": "Activity Trends",
+    "weekly": "Weekly",
+    "monthly": "Monthly",
+    "currentPeriod": "Current Period",
+    "previousPeriod": "Previous Period",
+    "popularThisWeek": "Popular This Week",
+    "plays": "Plays",
+    "userComparison": "User Comparison",
+    "completionRates": "Completion Rates",
+    "bandwidth": "Bandwidth Estimate",
+    "peakBandwidth": "Peak",
+    "dataPoints": "Data Points"
   },
   "users": {
     "playedMedia": "Played Media",
@@ -223,6 +250,32 @@
     "tracks": "{{count}} Tracks",
     "viewArtist": "View Artist",
     "viewAlbum": "View Album"
+  },
+  "notifications": {
+    "title": "Notifications",
+    "alerts": "Alert Settings",
+    "empty": "No notifications yet",
+    "streamStart": "Stream Started",
+    "streamStartDesc": "Notify when a user starts streaming",
+    "streamEnd": "Stream Ended",
+    "streamEndDesc": "Notify when a stream ends",
+    "transcodeLoad": "Transcode Overload",
+    "transcodeLoadDesc": "Alert when transcode threshold exceeded",
+    "serverError": "Server Errors",
+    "serverErrorDesc": "Alert on server connection issues",
+    "thresholds": "Thresholds",
+    "concurrentStreams": "Concurrent Streams",
+    "transcodeSessions": "Transcode Sessions",
+    "webhookName": "Webhook name",
+    "webhookUrl": "Webhook URL",
+    "addWebhook": "Add Webhook",
+    "noWebhooks": "No webhooks configured yet.",
+    "webhookCreated": "Webhook created",
+    "testSent": "Test notification sent",
+    "testFailed": "Test notification failed",
+    "markAllRead": "Mark all as read",
+    "deleteAll": "Clear all",
+    "confirmDeleteAll": "Clear all notifications?"
   },
   "toast": {
     "profileSaved": "Profile saved",

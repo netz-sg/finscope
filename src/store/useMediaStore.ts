@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import type { Session, JellyfinUser, ItemCounts, NewsItem, NowPlayingItem, GenreCount, PulseStats } from '../types/jellyfin'
-import type { AnalyticsData, LibraryData } from '../types/app'
+import type { AnalyticsData, LibraryData, ExtendedAnalytics } from '../types/app'
 
 interface MediaState {
   sessions: Session[]
@@ -8,6 +8,7 @@ interface MediaState {
   counts: ItemCounts | null
   libraryData: LibraryData
   analyticsData: AnalyticsData
+  extendedAnalytics: ExtendedAnalytics
   genreData: GenreCount[]
   pulseStats: PulseStats | null
   news: NewsItem[]
@@ -18,6 +19,7 @@ interface MediaState {
   setCounts: (counts: ItemCounts | null) => void
   setLibraryData: (data: LibraryData) => void
   setAnalyticsData: (data: AnalyticsData) => void
+  setExtendedAnalytics: (data: ExtendedAnalytics) => void
   setGenreData: (data: GenreCount[]) => void
   setPulseStats: (data: PulseStats) => void
   setNews: (news: NewsItem[]) => void
@@ -31,6 +33,7 @@ const initialState = {
   counts: null,
   libraryData: { mostPlayed: [], latest: [], libraries: [] },
   analyticsData: { historyMap: {}, peakHours: Array(24).fill(0) as number[], clients: {} },
+  extendedAnalytics: { trends: [], popular: [], userComparison: [], completionRates: [] } as ExtendedAnalytics,
   genreData: [] as GenreCount[],
   pulseStats: null as PulseStats | null,
   news: [],
@@ -45,6 +48,7 @@ export const useMediaStore = create<MediaState>((set) => ({
   setCounts: (counts) => set({ counts }),
   setLibraryData: (libraryData) => set({ libraryData }),
   setAnalyticsData: (analyticsData) => set({ analyticsData }),
+  setExtendedAnalytics: (extendedAnalytics) => set({ extendedAnalytics }),
   setGenreData: (genreData) => set({ genreData }),
   setPulseStats: (pulseStats) => set({ pulseStats }),
   setNews: (news) => set({ news }),

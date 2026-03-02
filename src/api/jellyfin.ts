@@ -25,9 +25,29 @@ export const JellyfinAPI = {
     }),
 
   getSessions: (_url: string, _apiKey: string): Promise<Session[]> =>
-    authFetch<Session[]>('/api/jellyfin/sessions', []).then((sessions) =>
-      sessions.filter((s) => s.NowPlayingItem != null),
-    ),
+    authFetch<Session[]>('/api/jellyfin/sessions', []).then((sessions) => {
+      const withItem = sessions.filter((s) => s.NowPlayingItem != null)
+      const deviceMap = new Map<string, Session>()
+      for (const s of withItem) {
+        const key = `${s.UserId}:${s.DeviceName}`
+        const existing = deviceMap.get(key)
+        if (!existing) {
+          deviceMap.set(key, s)
+          continue
+        }
+        const existingPaused = existing.PlayState.IsPaused
+        const currentPaused = s.PlayState.IsPaused
+        if (existingPaused && !currentPaused) {
+          deviceMap.set(key, s)
+          continue
+        }
+        if (!existingPaused && currentPaused) continue
+        const existingTime = existing.LastActivityDate ? new Date(existing.LastActivityDate).getTime() : 0
+        const currentTime = s.LastActivityDate ? new Date(s.LastActivityDate).getTime() : 0
+        if (currentTime > existingTime) deviceMap.set(key, s)
+      }
+      return [...deviceMap.values()]
+    }),
 
   getUsers: (_url: string, _apiKey: string): Promise<JellyfinUser[]> =>
     authFetch<JellyfinUser[]>('/api/jellyfin/users', []),
@@ -79,7 +99,7 @@ export const JellyfinAPI = {
     }
   },
 
-  trackSessions: async (sessions: { userId: string; userName: string; itemId: string; itemName: string; itemType: string; client: string }[]): Promise<void> => {
+  trackSessions: async (sessions: { userId: string; userName: string; itemId: string; itemName: string; itemType: string; client: string; positionTicks?: number; runtimeTicks?: number; isTranscoding?: boolean }[]): Promise<void> => {
     if (sessions.length === 0) return
     try {
       await fetch('/api/history/track-sessions', {
@@ -180,4 +200,67 @@ export const JellyfinAPI = {
       `/api/jellyfin/users/${userId}/album-tracks?albumId=${encodeURIComponent(albumId)}`,
       [],
     ),
+
+  getTrends: async (period: 'weekly' | 'monthly' = 'weekly') => {
+    try {
+      const res = await fetch(`/api/history/analytics/trends?period=${period}`, { headers: getAuthHeaders() })
+      if (!res.ok) return []
+      return await res.json()
+    } catch { return [] }
+  },
+
+  getPopularThisWeek: async () => {
+    try {
+      const res = await fetch('/api/history/analytics/popular', { headers: getAuthHeaders() })
+      if (!res.ok) return []
+      return await res.json()
+    } catch { return [] }
+  },
+
+  getUserComparison: async () => {
+    try {
+      const res = await fetch('/api/history/analytics/user-comparison', { headers: getAuthHeaders() })
+      if (!res.ok) return []
+      return await res.json()
+    } catch { return [] }
+  },
+
+  getCompletionRates: async () => {
+    try {
+      const res = await fetch('/api/history/analytics/completion-rates', { headers: getAuthHeaders() })
+      if (!res.ok) return []
+      return await res.json()
+    } catch { return [] }
+  },
+
+  sendPlaystateCommand: async (sessionId: string, command: 'Pause' | 'Unpause' | 'Stop' | 'NextTrack' | 'PreviousTrack'): Promise<boolean> => {
+    try {
+      const response = await fetch(`/api/jellyfin/sessions/${encodeURIComponent(sessionId)}/playstate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+        body: JSON.stringify({ command }),
+      })
+      return response.ok
+    } catch {
+      return false
+    }
+  },
+
+  getActivityLog: async (limit = 50, startIndex = 0) => {
+    try {
+      const res = await fetch(`/api/jellyfin/activity?limit=${limit}&startIndex=${startIndex}`, {
+        headers: getAuthHeaders(),
+      })
+      if (!res.ok) return []
+      return await res.json()
+    } catch { return [] }
+  },
+
+  getBandwidthHistory: async (range: '24h' | '7d' | '30d' = '24h') => {
+    try {
+      const res = await fetch(`/api/history/analytics/bandwidth?range=${range}`, { headers: getAuthHeaders() })
+      if (!res.ok) return []
+      return await res.json()
+    } catch { return [] }
+  },
 }

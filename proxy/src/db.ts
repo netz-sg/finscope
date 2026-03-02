@@ -55,6 +55,53 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
   CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at);
 
+  CREATE TABLE IF NOT EXISTS notification_settings (
+    user_id TEXT PRIMARY KEY,
+    stream_start INTEGER NOT NULL DEFAULT 1,
+    stream_end INTEGER NOT NULL DEFAULT 1,
+    transcode_load INTEGER NOT NULL DEFAULT 0,
+    server_error INTEGER NOT NULL DEFAULT 1,
+    threshold_concurrent INTEGER NOT NULL DEFAULT 5,
+    threshold_transcode INTEGER NOT NULL DEFAULT 3,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  );
+
+  CREATE TABLE IF NOT EXISTS webhook_configs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    platform TEXT NOT NULL CHECK(platform IN ('discord', 'telegram', 'slack')),
+    webhook_url TEXT NOT NULL,
+    is_active INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  );
+
+  CREATE TABLE IF NOT EXISTS notification_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id TEXT NOT NULL,
+    event_type TEXT NOT NULL,
+    title TEXT NOT NULL,
+    message TEXT NOT NULL,
+    is_read INTEGER NOT NULL DEFAULT 0,
+    metadata TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_notification_log_user ON notification_log(user_id, created_at DESC);
+
+  CREATE TABLE IF NOT EXISTS bandwidth_snapshots (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    server_url TEXT NOT NULL,
+    timestamp TEXT NOT NULL DEFAULT (datetime('now')),
+    active_sessions INTEGER NOT NULL DEFAULT 0,
+    transcode_sessions INTEGER NOT NULL DEFAULT 0,
+    estimated_mbps REAL NOT NULL DEFAULT 0
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_bandwidth_ts ON bandwidth_snapshots(server_url, timestamp);
+
   CREATE TABLE IF NOT EXISTS jellyfin_configs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id TEXT NOT NULL,
@@ -68,6 +115,18 @@ db.exec(`
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
   );
 `)
+
+try {
+  db.exec(`ALTER TABLE playback_history ADD COLUMN position_ticks INTEGER DEFAULT 0`)
+} catch {}
+
+try {
+  db.exec(`ALTER TABLE playback_history ADD COLUMN runtime_ticks INTEGER DEFAULT 0`)
+} catch {}
+
+try {
+  db.exec(`ALTER TABLE notification_log ADD COLUMN metadata TEXT`)
+} catch {}
 
 const avatarDir = path.resolve(path.dirname(DB_PATH), 'avatars')
 fs.mkdirSync(avatarDir, { recursive: true })

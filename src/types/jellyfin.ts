@@ -36,8 +36,10 @@ export interface Session {
   Client: string
   UserName: string
   UserId: string
+  LastActivityDate?: string
   PlayState: PlayState
   NowPlayingItem: NowPlayingItem
+  TranscodingInfo?: { IsVideoDirect?: boolean; IsAudioDirect?: boolean }
 }
 
 export interface ItemDetail {

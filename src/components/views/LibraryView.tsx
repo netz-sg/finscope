@@ -1,137 +1,129 @@
 import { useTranslation } from 'react-i18next'
-import { Film, Tv, Clapperboard, Music, FolderOpen, Play, Star } from 'lucide-react'
+import { Film, Tv, Clapperboard, Music, FolderOpen, Play, Star, Trophy } from 'lucide-react'
 import { useMediaStore } from '../../store/useMediaStore'
 import { useAppStore } from '../../store/useAppStore'
-import { GLASS_PANEL, GLASS_INNER } from '../../design/tokens'
+import { useUIStore } from '../../store/useUIStore'
+import { GLASS_PANEL, GLASS_INNER, GLASS_PANEL_HOVER, TRANSITION } from '../../design/tokens'
 import { getMediaTypeConfig } from '../../utils/mediaTypes'
 import { JellyfinAPI } from '../../api/jellyfin'
 import CoverArt from '../ui/CoverArt'
 import { SkeletonStatCard, SkeletonCoverCard } from '../ui/Skeleton'
 
-/* ------------------------------------------------------------------ */
-/*  Stat Card                                                         */
-/* ------------------------------------------------------------------ */
-function StatCard({
-  icon: Icon,
-  label,
-  count,
-  iconBg,
-  iconColor,
-}: {
-  icon: React.ComponentType<{ size?: number; className?: string }>
-  label: string
-  count: number
-  iconBg: string
-  iconColor: string
-}) {
-  return (
-    <div className={`${GLASS_PANEL} rounded-3xl p-6 flex items-center gap-5`}>
-      <div className={`w-12 h-12 ${iconBg} rounded-2xl flex items-center justify-center shrink-0`}>
-        <Icon size={22} className={iconColor} />
-      </div>
-      <div className="min-w-0">
-        <p className="text-2xl font-bold tracking-tight text-white">
-          {count.toLocaleString()}
-        </p>
-        <p className="text-xs text-white/40 font-medium uppercase tracking-wider mt-0.5">
-          {label}
-        </p>
-      </div>
-    </div>
-  )
-}
-
-/* ------------------------------------------------------------------ */
-/*  Genre color palette                                               */
-/* ------------------------------------------------------------------ */
-const GENRE_COLORS = [
-  'bg-blue-400', 'bg-purple-400', 'bg-emerald-400',
-  'bg-amber-400', 'bg-pink-400', 'bg-cyan-400',
-  'bg-rose-400', 'bg-indigo-400',
+const GENRE_PALETTE = [
+  { pill: 'bg-blue-400/15 border-blue-400/25 text-blue-300', dot: 'bg-blue-400' },
+  { pill: 'bg-purple-400/15 border-purple-400/25 text-purple-300', dot: 'bg-purple-400' },
+  { pill: 'bg-emerald-400/15 border-emerald-400/25 text-emerald-300', dot: 'bg-emerald-400' },
+  { pill: 'bg-pink-400/15 border-pink-400/25 text-pink-300', dot: 'bg-pink-400' },
+  { pill: 'bg-amber-400/15 border-amber-400/25 text-amber-300', dot: 'bg-amber-400' },
+  { pill: 'bg-cyan-400/15 border-cyan-400/25 text-cyan-300', dot: 'bg-cyan-400' },
+  { pill: 'bg-rose-400/15 border-rose-400/25 text-rose-300', dot: 'bg-rose-400' },
+  { pill: 'bg-indigo-400/15 border-indigo-400/25 text-indigo-300', dot: 'bg-indigo-400' },
 ]
 
-/* ------------------------------------------------------------------ */
-/*  Folder icon resolver                                              */
-/* ------------------------------------------------------------------ */
+const RANK_META = [
+  { ghost: 'text-[96px] text-amber-400/[0.08]', num: 'text-amber-400', pill: 'bg-amber-400/15 border-amber-400/30 text-amber-400', icon: 'text-amber-400' },
+  { ghost: 'text-[80px] text-slate-400/[0.07]', num: 'text-slate-300', pill: 'bg-white/[0.05] border-white/[0.08] text-white/60', icon: 'text-white/40' },
+  { ghost: 'text-[72px] text-amber-700/[0.07]', num: 'text-amber-700/80', pill: 'bg-white/[0.05] border-white/[0.08] text-white/60', icon: 'text-white/40' },
+  { ghost: 'text-[64px] text-white/[0.04]', num: 'text-white/30', pill: 'bg-white/[0.04] border-white/[0.06] text-white/40', icon: 'text-white/30' },
+  { ghost: 'text-[64px] text-white/[0.04]', num: 'text-white/30', pill: 'bg-white/[0.04] border-white/[0.06] text-white/40', icon: 'text-white/30' },
+]
+
 function folderIcon(collectionType: string) {
   switch (collectionType) {
-    case 'movies':
-      return <Film size={20} className="text-blue-400" />
-    case 'tvshows':
-      return <Tv size={20} className="text-purple-400" />
-    case 'music':
-      return <Music size={20} className="text-pink-400" />
-    default:
-      return <FolderOpen size={20} className="text-white/60" />
+    case 'movies': return <Film size={24} className="text-blue-400" />
+    case 'tvshows': return <Tv size={24} className="text-purple-400" />
+    case 'music': return <Music size={24} className="text-pink-400" />
+    default: return <FolderOpen size={24} className="text-white/60" />
   }
 }
 
-/* ================================================================== */
-/*  LibraryView                                                       */
-/* ================================================================== */
+function folderAccent(collectionType: string) {
+  switch (collectionType) {
+    case 'movies': return 'bg-blue-400/15'
+    case 'tvshows': return 'bg-purple-400/15'
+    case 'music': return 'bg-pink-400/15'
+    default: return 'bg-white/[0.06]'
+  }
+}
+
 export default function LibraryView() {
   const { t } = useTranslation()
   const counts = useMediaStore((s) => s.counts)
   const genreData = useMediaStore((s) => s.genreData)
   const { mostPlayed, latest, libraries } = useMediaStore((s) => s.libraryData)
   const { config, isDemoMode } = useAppStore()
+  const { setSelectedItem } = useUIStore()
 
-  const totalVideoItems =
-    (counts?.MovieCount ?? 0) + (counts?.EpisodeCount ?? 0)
+  const totalVideoItems = (counts?.MovieCount ?? 0) + (counts?.EpisodeCount ?? 0)
   const estimatedHours = Math.round(totalVideoItems * 0.75)
 
   return (
-    <div className="space-y-8">
-      {/* ── Top Stats Row ────────────────────────────────────────── */}
+    <div className="space-y-6">
+
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         {counts === null ? (
           <>
-            <SkeletonStatCard />
-            <SkeletonStatCard />
-            <SkeletonStatCard />
-            <SkeletonStatCard />
+            <SkeletonStatCard /><SkeletonStatCard /><SkeletonStatCard /><SkeletonStatCard />
           </>
         ) : (
           <>
-            <StatCard
-              icon={Film}
-              label={t('library.movies')}
-              count={counts.MovieCount ?? 0}
-              iconBg="bg-blue-400/15"
-              iconColor="text-blue-400"
-            />
-            <StatCard
-              icon={Tv}
-              label={t('library.series')}
-              count={counts.SeriesCount ?? 0}
-              iconBg="bg-purple-400/15"
-              iconColor="text-purple-400"
-            />
-            <StatCard
-              icon={Clapperboard}
-              label={t('library.episodes')}
-              count={counts.EpisodeCount ?? 0}
-              iconBg="bg-emerald-400/15"
-              iconColor="text-emerald-400"
-            />
-            <StatCard
-              icon={Music}
-              label={t('library.music')}
-              count={counts.SongCount ?? 0}
-              iconBg="bg-pink-400/15"
-              iconColor="text-pink-400"
-            />
+            <div className={`relative ${GLASS_PANEL} rounded-3xl p-6 overflow-hidden cursor-default`}>
+              <div className="absolute -top-8 -right-8 w-32 h-32 bg-blue-400 rounded-full blur-3xl opacity-[0.12]" />
+              <div className="absolute bottom-0 left-6 right-6 h-px bg-gradient-to-r from-transparent via-blue-400/60 to-transparent" />
+              <Film size={15} className="text-blue-400/50 mb-4" />
+              <p className="text-5xl font-black tracking-tight text-blue-400 tabular-nums">
+                {(counts.MovieCount ?? 0).toLocaleString()}
+              </p>
+              <p className="text-[10px] text-white/35 font-bold uppercase tracking-widest mt-2">
+                {t('library.movies')}
+              </p>
+            </div>
+
+            <div className={`relative ${GLASS_PANEL} rounded-3xl p-6 overflow-hidden cursor-default`}>
+              <div className="absolute -top-8 -right-8 w-32 h-32 bg-purple-400 rounded-full blur-3xl opacity-[0.12]" />
+              <div className="absolute bottom-0 left-6 right-6 h-px bg-gradient-to-r from-transparent via-purple-400/60 to-transparent" />
+              <Tv size={15} className="text-purple-400/50 mb-4" />
+              <p className="text-5xl font-black tracking-tight text-purple-400 tabular-nums">
+                {(counts.SeriesCount ?? 0).toLocaleString()}
+              </p>
+              <p className="text-[10px] text-white/35 font-bold uppercase tracking-widest mt-2">
+                {t('library.series')}
+              </p>
+            </div>
+
+            <div className={`relative ${GLASS_PANEL} rounded-3xl p-6 overflow-hidden cursor-default`}>
+              <div className="absolute -top-8 -right-8 w-32 h-32 bg-emerald-400 rounded-full blur-3xl opacity-[0.12]" />
+              <div className="absolute bottom-0 left-6 right-6 h-px bg-gradient-to-r from-transparent via-emerald-400/60 to-transparent" />
+              <Clapperboard size={15} className="text-emerald-400/50 mb-4" />
+              <p className="text-5xl font-black tracking-tight text-emerald-400 tabular-nums">
+                {(counts.EpisodeCount ?? 0).toLocaleString()}
+              </p>
+              <p className="text-[10px] text-white/35 font-bold uppercase tracking-widest mt-2">
+                {t('library.episodes')}
+              </p>
+            </div>
+
+            <div className={`relative ${GLASS_PANEL} rounded-3xl p-6 overflow-hidden cursor-default`}>
+              <div className="absolute -top-8 -right-8 w-32 h-32 bg-pink-400 rounded-full blur-3xl opacity-[0.12]" />
+              <div className="absolute bottom-0 left-6 right-6 h-px bg-gradient-to-r from-transparent via-pink-400/60 to-transparent" />
+              <Music size={15} className="text-pink-400/50 mb-4" />
+              <p className="text-5xl font-black tracking-tight text-pink-400 tabular-nums">
+                {(counts.SongCount ?? 0).toLocaleString()}
+              </p>
+              <p className="text-[10px] text-white/35 font-bold uppercase tracking-widest mt-2">
+                {t('library.music')}
+              </p>
+            </div>
           </>
         )}
       </div>
 
-      {/* ── Bento Grid (2/3 + 1/3) ──────────────────────────────── */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        {/* Left: All-Time Favorites */}
+
         <div className={`lg:col-span-2 ${GLASS_PANEL} rounded-3xl p-6`}>
-          <div className="flex items-center gap-3 mb-6">
-            <Star size={18} className="text-amber-400" />
-            <h2 className="text-sm font-semibold tracking-wide text-white/80 uppercase">
+          <div className="flex items-center gap-2.5 mb-6">
+            <Trophy size={15} className="text-amber-400/70" />
+            <h2 className="text-[10px] font-bold tracking-widest text-white/50 uppercase">
               {t('library.allTimeFavorites')}
             </h2>
           </div>
@@ -139,53 +131,48 @@ export default function LibraryView() {
           {mostPlayed.length === 0 ? (
             <p className="text-white/30 text-sm">{t('library.noData')}</p>
           ) : (
-            <div className="space-y-3">
+            <div className="space-y-2">
               {mostPlayed.slice(0, 5).map((item, idx) => {
                 const cfg = getMediaTypeConfig(item.Type)
+                const rank = RANK_META[idx]
                 return (
                   <div
                     key={item.Id}
-                    className={`${GLASS_INNER} rounded-2xl p-3 flex items-center gap-4 group`}
+                    className={`${GLASS_INNER} rounded-2xl px-4 py-3 flex items-center gap-4 relative overflow-hidden ${TRANSITION} hover:bg-white/[0.04]`}
                   >
-                    {/* Rank */}
-                    <span className="text-lg font-black text-white/20 w-7 text-center shrink-0">
+                    <span
+                      className={`absolute right-3 bottom-0 font-black leading-none select-none pointer-events-none tabular-nums ${rank.ghost}`}
+                      aria-hidden="true"
+                    >
+                      {String(idx + 1).padStart(2, '0')}
+                    </span>
+
+                    <span className={`text-lg font-black tabular-nums w-6 shrink-0 ${rank.num}`}>
                       {idx + 1}
                     </span>
 
-                    {/* Cover thumbnail */}
-                    <CoverArt
-                      url={JellyfinAPI.getItemImageUrl(config.url, item.Id)}
-                      title={item.Name}
-                      isDemo={isDemoMode}
-                      type={item.Type}
-                      className="w-10 h-14 shrink-0 !rounded-lg"
-                    />
+                    <div className="shrink-0">
+                      <CoverArt
+                        url={JellyfinAPI.getItemImageUrl(config.url, item.Id)}
+                        title={item.Name}
+                        isDemo={isDemoMode}
+                        type={item.Type}
+                        className="w-9 h-[52px] !rounded-xl"
+                      />
+                    </div>
 
-                    {/* Title + meta */}
-                    <div className="min-w-0 flex-1">
-                      <p className="text-sm font-semibold text-white truncate">
-                        {item.Name}
-                      </p>
-                      <p className="text-xs text-white/40 flex items-center gap-1.5 mt-0.5">
-                        <cfg.icon size={12} className={cfg.color} />
-                        {cfg.label}
-                        {item.ProductionYear && (
-                          <span className="ml-1 text-white/25">
-                            {item.ProductionYear}
-                          </span>
-                        )}
+                    <div className="min-w-0 flex-1 relative z-10">
+                      <p className="text-sm font-bold text-white/90 truncate">{item.Name}</p>
+                      <p className="text-[11px] text-white/40 flex items-center gap-1.5 mt-0.5">
+                        <cfg.icon size={10} className={cfg.color} />
+                        {item.ProductionYear ?? cfg.label}
                       </p>
                     </div>
 
-                    {/* Play count badge */}
-                    <div className="flex items-center gap-1.5 shrink-0">
-                      <Play size={12} className="text-white/30" />
-                      <span className="text-xs font-mono font-bold text-white/60">
-                        {item.PlayCount ?? 0}
-                      </span>
-                      <span className="text-[10px] text-white/25 uppercase">
-                        {t('library.plays')}
-                      </span>
+                    <div className={`flex items-center gap-1.5 shrink-0 px-2.5 py-1 rounded-full border relative z-10 ${rank.pill}`}>
+                      <Play size={9} className={rank.icon} />
+                      <span className="text-xs font-black tabular-nums">{item.PlayCount ?? 0}</span>
+                      <span className="text-[9px] font-bold opacity-60 uppercase">{t('library.plays')}</span>
                     </div>
                   </div>
                 )
@@ -194,50 +181,52 @@ export default function LibraryView() {
           )}
         </div>
 
-        {/* Right: Content Matrix */}
-        <div className={`${GLASS_PANEL} rounded-3xl p-6 flex flex-col justify-between`}>
-          <div>
-            <h2 className="text-sm font-semibold tracking-wide text-white/80 uppercase mb-6">
-              {t('library.contentMatrix')}
+        <div className={`${GLASS_PANEL} rounded-3xl p-6 flex flex-col`}>
+          <div className="flex items-center gap-2.5 mb-5">
+            <Star size={15} className="text-white/40" />
+            <h2 className="text-[10px] font-bold tracking-widest text-white/50 uppercase">
+              {t('library.genreDistribution')}
             </h2>
-
-            {genreData.length === 0 ? (
-              <p className="text-white/30 text-sm">{t('library.noGenres')}</p>
-            ) : (
-              <div className="space-y-4">
-                {genreData.map((g, idx) => (
-                  <div key={g.name}>
-                    <div className="flex items-center justify-between mb-1.5">
-                      <span className="text-xs text-white/60 font-medium">{g.name}</span>
-                      <span className="text-xs font-mono text-white/40">{g.pct}%</span>
-                    </div>
-                    <div className="h-2 w-full rounded-full bg-white/[0.05] overflow-hidden">
-                      <div
-                        className={`h-full rounded-full ${GENRE_COLORS[idx % GENRE_COLORS.length]} transition-all duration-1000 ease-out`}
-                        style={{ width: `${g.pct}%` }}
-                      />
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
           </div>
 
-          {/* Total watch time stat */}
-          <div className={`${GLASS_INNER} rounded-2xl p-4 mt-6 text-center`}>
-            <p className="text-3xl font-black tracking-tight text-white">
+          {genreData.length === 0 ? (
+            <p className="text-white/30 text-sm">{t('library.noGenres')}</p>
+          ) : (
+            <div className="flex flex-wrap gap-2 flex-1">
+              {genreData.map((g, idx) => {
+                const palette = GENRE_PALETTE[idx % GENRE_PALETTE.length]
+                const isLarge = g.pct >= 20
+                const isMed = g.pct >= 10
+                const pillSize = isLarge ? 'px-4 py-2 text-sm' : isMed ? 'px-3 py-1.5 text-xs' : 'px-2.5 py-1 text-[10px]'
+                const opacityClass = isLarge ? 'opacity-100' : isMed ? 'opacity-80' : 'opacity-55'
+                return (
+                  <div
+                    key={g.name}
+                    className={`flex items-center gap-1.5 rounded-full border ${palette.pill} ${pillSize} ${opacityClass} ${TRANSITION} hover:opacity-100 hover:scale-105`}
+                  >
+                    <div className={`w-1.5 h-1.5 rounded-full ${palette.dot} shrink-0`} />
+                    <span className="font-bold">{g.name}</span>
+                    <span className="font-black opacity-60">{g.pct}%</span>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+
+          <div className={`${GLASS_INNER} rounded-2xl p-5 mt-5 text-center relative overflow-hidden`}>
+            <div className="absolute inset-0 bg-gradient-to-br from-white/[0.02] to-transparent" />
+            <p className="text-4xl font-black tracking-tight text-white relative z-10 tabular-nums">
               {estimatedHours.toLocaleString()}
             </p>
-            <p className="text-[10px] text-white/30 font-medium uppercase tracking-widest mt-1">
-              {t('library.totalWatchTime')} ({t('library.hours')})
+            <p className="text-[10px] text-white/30 font-bold uppercase tracking-widest mt-1.5 relative z-10">
+              {t('library.totalWatchTime')} · {t('library.hours')}
             </p>
           </div>
         </div>
       </div>
 
-      {/* ── Recently Added ───────────────────────────────────────── */}
       <div className={`${GLASS_PANEL} rounded-3xl p-6`}>
-        <h2 className="text-sm font-semibold tracking-wide text-white/80 uppercase mb-5">
+        <h2 className="text-[10px] font-bold tracking-widest text-white/50 uppercase mb-6">
           {t('library.recentlyAdded')}
         </h2>
 
@@ -248,28 +237,29 @@ export default function LibraryView() {
         ) : latest.length === 0 ? (
           <p className="text-white/30 text-sm">{t('library.noNewMedia')}</p>
         ) : (
-          <div className="flex gap-4 overflow-x-auto pb-2 scrollbar-thin scrollbar-thumb-white/10 scrollbar-track-transparent">
+          <div className="flex gap-4 overflow-x-auto pb-1 hide-scrollbar">
             {latest.map((item) => {
               const cfg = getMediaTypeConfig(item.Type)
               return (
-                <div
-                  key={item.Id}
-                  className="shrink-0 w-[140px] group cursor-pointer"
-                >
-                  <CoverArt
-                    url={JellyfinAPI.getItemImageUrl(config.url, item.Id)}
-                    title={item.Name}
-                    isDemo={isDemoMode}
-                    type={item.Type}
-                    className="w-[140px] h-[210px] group-hover:shadow-[0_8px_30px_rgba(255,255,255,0.08)] transition-all duration-500 group-hover:-translate-y-1"
-                  />
-                  <p className="text-xs font-semibold text-white/80 mt-2.5 truncate">
-                    {item.Name}
-                  </p>
-                  <p className="text-[10px] text-white/30 flex items-center gap-1 mt-0.5">
-                    <cfg.icon size={10} className={cfg.color} />
-                    {item.ProductionYear ?? ''}
-                  </p>
+                <div key={item.Id} onClick={() => setSelectedItem(item)} className={`shrink-0 w-[140px] group cursor-pointer ${TRANSITION}`}>
+                  <div className="relative overflow-hidden rounded-2xl">
+                    <CoverArt
+                      url={JellyfinAPI.getItemImageUrl(config.url, item.Id)}
+                      title={item.Name}
+                      isDemo={isDemoMode}
+                      type={item.Type}
+                      className="w-[140px] h-[210px] !rounded-2xl transition-transform duration-700 group-hover:scale-[1.05]"
+                    />
+                    <div className="absolute inset-0 rounded-2xl bg-gradient-to-t from-black/90 via-black/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-400" />
+                    <div className="absolute bottom-0 left-0 right-0 p-3 translate-y-1 opacity-0 group-hover:translate-y-0 group-hover:opacity-100 transition-all duration-400">
+                      <span className={`inline-flex items-center gap-1 text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-black/50 backdrop-blur-sm border border-white/10 ${cfg.color}`}>
+                        <cfg.icon size={8} />
+                        {cfg.label}
+                      </span>
+                    </div>
+                  </div>
+                  <p className="text-xs font-bold text-white/80 mt-2.5 truncate">{item.Name}</p>
+                  <p className="text-[10px] text-white/30 mt-0.5">{item.ProductionYear ?? ''}</p>
                 </div>
               )
             })}
@@ -277,31 +267,18 @@ export default function LibraryView() {
         )}
       </div>
 
-      {/* ── Library Folders ──────────────────────────────────────── */}
       {libraries.length > 0 && (
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           {libraries.map((lib) => (
             <div
               key={lib.Id}
-              className={`${GLASS_PANEL} rounded-3xl p-5 flex items-center gap-4`}
+              className={`${GLASS_PANEL} ${GLASS_PANEL_HOVER} rounded-3xl p-5 flex items-center gap-4`}
             >
-              <div
-                className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
-                  lib.CollectionType === 'movies'
-                    ? 'bg-blue-400/15'
-                    : lib.CollectionType === 'tvshows'
-                      ? 'bg-purple-400/15'
-                      : lib.CollectionType === 'music'
-                        ? 'bg-pink-400/15'
-                        : 'bg-white/[0.06]'
-                }`}
-              >
+              <div className={`w-11 h-11 rounded-2xl flex items-center justify-center shrink-0 ${folderAccent(lib.CollectionType)}`}>
                 {folderIcon(lib.CollectionType)}
               </div>
               <div className="min-w-0">
-                <p className="text-sm font-semibold text-white truncate">
-                  {lib.Name}
-                </p>
+                <p className="text-sm font-bold text-white/90 truncate">{lib.Name}</p>
                 <p className="text-[10px] text-white/30 uppercase tracking-wider mt-0.5">
                   {lib.CollectionType || 'mixed'}
                 </p>
@@ -310,6 +287,7 @@ export default function LibraryView() {
           ))}
         </div>
       )}
+
     </div>
   )
 }

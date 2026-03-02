@@ -1,16 +1,20 @@
-import { useState, useRef, type FormEvent } from 'react'
+import { useState, useRef, useEffect, type FormEvent } from 'react'
 import {
   Settings, Server, Info, Github, Coffee, Trash2, Globe,
   User, Camera, Check, Loader2, Eye, EyeOff, KeyRound, Pencil, RotateCcw,
+  Bell, Plus, X, Send, Zap,
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { useAppStore } from '../../store/useAppStore'
 import { useUIStore } from '../../store/useUIStore'
+import { useNotificationStore } from '../../store/useNotificationStore'
+import { NotificationsAPI } from '../../api/notifications'
 import { toast } from '../../store/useToastStore'
 import { GLASS_PANEL, GLASS_INNER, TRANSITION } from '../../design/tokens'
+import type { WebhookConfig } from '../../types/app'
 import i18n from '../../i18n'
 
-type Tab = 'profile' | 'server' | 'about'
+type Tab = 'profile' | 'server' | 'notifications' | 'about'
 
 export default function SettingsView() {
   const { t } = useTranslation()
@@ -140,9 +144,57 @@ export default function SettingsView() {
   const serverDisplay = jellyfinConfig?.serverUrl || config.url || '--'
   const maskedToken = jellyfinConfig?.apiKeyMasked || '****'
 
+  const { settings: notifSettings, setSettings: setNotifSettings, webhooks, setWebhooks } = useNotificationStore()
+  const [webhookForm, setWebhookForm] = useState({ name: '', platform: 'discord' as string, webhookUrl: '' })
+  const [showWebhookForm, setShowWebhookForm] = useState(false)
+  const [webhookLoading, setWebhookLoading] = useState(false)
+
+  useEffect(() => {
+    if (activeTab === 'notifications') {
+      NotificationsAPI.getSettings().then(setNotifSettings)
+      NotificationsAPI.getWebhooks().then(setWebhooks)
+    }
+  }, [activeTab, setNotifSettings, setWebhooks])
+
+  const handleNotifToggle = async (key: keyof typeof notifSettings, value: boolean | number) => {
+    const updated = { ...notifSettings, [key]: value }
+    setNotifSettings(updated)
+    await NotificationsAPI.saveSettings(updated)
+  }
+
+  const handleCreateWebhook = async () => {
+    if (!webhookForm.name || !webhookForm.webhookUrl) return
+    setWebhookLoading(true)
+    const created = await NotificationsAPI.createWebhook(webhookForm)
+    if (created) {
+      setWebhooks([created, ...webhooks])
+      setWebhookForm({ name: '', platform: 'discord', webhookUrl: '' })
+      setShowWebhookForm(false)
+      toast.success(t('notifications.webhookCreated'))
+    }
+    setWebhookLoading(false)
+  }
+
+  const handleDeleteWebhook = async (id: number) => {
+    await NotificationsAPI.deleteWebhook(id)
+    setWebhooks(webhooks.filter((w) => w.id !== id))
+  }
+
+  const handleTestWebhook = async (id: number) => {
+    const success = await NotificationsAPI.testWebhook(id)
+    if (success) toast.success(t('notifications.testSent'))
+    else toast.error(t('notifications.testFailed'))
+  }
+
+  const handleToggleWebhook = async (wh: WebhookConfig) => {
+    await NotificationsAPI.updateWebhook(wh.id, { isActive: !wh.isActive })
+    setWebhooks(webhooks.map((w) => w.id === wh.id ? { ...w, isActive: !w.isActive } : w))
+  }
+
   const tabs: { id: Tab; icon: typeof User; label: string }[] = [
     { id: 'profile', icon: User, label: t('profile.title') },
     { id: 'server', icon: Server, label: t('settings.localServer') },
+    { id: 'notifications', icon: Bell, label: t('notifications.title') },
     { id: 'about', icon: Info, label: t('settings.about') },
   ]
 
@@ -463,6 +515,182 @@ export default function SettingsView() {
                 <Trash2 size={16} />
                 {t('settings.logout')}
               </button>
+            </div>
+          </>
+        )}
+
+        {/* ════════ Notifications Tab ════════ */}
+        {activeTab === 'notifications' && (
+          <>
+            <div className={`rounded-[2.5rem] p-8 ${GLASS_PANEL}`}>
+              <div className="flex items-center gap-3 mb-8">
+                <Bell size={18} className="text-blue-400" />
+                <p className="text-sm font-bold uppercase tracking-wider text-white/60">
+                  {t('notifications.alerts')}
+                </p>
+              </div>
+
+              <div className="space-y-4">
+                {([
+                  { key: 'streamStart' as const, label: t('notifications.streamStart'), desc: t('notifications.streamStartDesc') },
+                  { key: 'streamEnd' as const, label: t('notifications.streamEnd'), desc: t('notifications.streamEndDesc') },
+                  { key: 'transcodeLoad' as const, label: t('notifications.transcodeLoad'), desc: t('notifications.transcodeLoadDesc') },
+                  { key: 'serverError' as const, label: t('notifications.serverError'), desc: t('notifications.serverErrorDesc') },
+                ] as const).map(({ key, label, desc }) => (
+                  <div key={key} className={`rounded-2xl p-5 flex items-center justify-between ${GLASS_INNER}`}>
+                    <div>
+                      <p className="text-sm font-semibold text-white/80">{label}</p>
+                      <p className="text-[11px] text-white/35 mt-0.5">{desc}</p>
+                    </div>
+                    <button
+                      onClick={() => handleNotifToggle(key, !notifSettings[key])}
+                      className={`relative w-11 h-6 rounded-full transition-all duration-300 ${
+                        notifSettings[key] ? 'bg-blue-500' : 'bg-white/10'
+                      }`}
+                    >
+                      <div className={`absolute top-1 w-4 h-4 rounded-full bg-white shadow transition-all duration-300 ${
+                        notifSettings[key] ? 'left-6' : 'left-1'
+                      }`} />
+                    </button>
+                  </div>
+                ))}
+
+                <div className="pt-2 space-y-3">
+                  <p className="text-[10px] font-bold text-white/40 uppercase tracking-widest">{t('notifications.thresholds')}</p>
+                  <div className={`rounded-2xl p-5 ${GLASS_INNER}`}>
+                    <div className="flex items-center justify-between mb-2">
+                      <p className="text-sm text-white/70">{t('notifications.concurrentStreams')}</p>
+                      <input
+                        type="number"
+                        min={1}
+                        max={50}
+                        value={notifSettings.thresholdConcurrent}
+                        onChange={(e) => handleNotifToggle('thresholdConcurrent', parseInt(e.target.value) || 5)}
+                        className={`w-16 rounded-lg p-2 text-center text-sm font-mono text-white ${GLASS_INNER} focus:outline-none focus:ring-1 focus:ring-white/20`}
+                      />
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <p className="text-sm text-white/70">{t('notifications.transcodeSessions')}</p>
+                      <input
+                        type="number"
+                        min={1}
+                        max={50}
+                        value={notifSettings.thresholdTranscode}
+                        onChange={(e) => handleNotifToggle('thresholdTranscode', parseInt(e.target.value) || 3)}
+                        className={`w-16 rounded-lg p-2 text-center text-sm font-mono text-white ${GLASS_INNER} focus:outline-none focus:ring-1 focus:ring-white/20`}
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className={`rounded-[2.5rem] p-8 ${GLASS_PANEL}`}>
+              <div className="flex items-center justify-between mb-8">
+                <div className="flex items-center gap-3">
+                  <Zap size={18} className="text-amber-400" />
+                  <p className="text-sm font-bold uppercase tracking-wider text-white/60">
+                    Webhooks
+                  </p>
+                </div>
+                <button
+                  onClick={() => setShowWebhookForm(!showWebhookForm)}
+                  className={`p-2 rounded-xl ${GLASS_INNER} hover:bg-white/[0.06] ${TRANSITION}`}
+                >
+                  {showWebhookForm ? <X size={16} className="text-white/50" /> : <Plus size={16} className="text-white/50" />}
+                </button>
+              </div>
+
+              {showWebhookForm && (
+                <div className={`rounded-2xl p-5 mb-4 space-y-3 ${GLASS_INNER}`}>
+                  <input
+                    type="text"
+                    placeholder={t('notifications.webhookName')}
+                    value={webhookForm.name}
+                    onChange={(e) => setWebhookForm({ ...webhookForm, name: e.target.value })}
+                    className={inputClass}
+                  />
+                  <div className="flex gap-2">
+                    {(['discord', 'telegram', 'slack'] as const).map((p) => (
+                      <button
+                        key={p}
+                        onClick={() => setWebhookForm({ ...webhookForm, platform: p })}
+                        className={`flex-1 py-2.5 rounded-xl text-xs font-bold capitalize ${TRANSITION} ${
+                          webhookForm.platform === p
+                            ? 'bg-white/12 text-white border border-white/20'
+                            : `text-white/40 ${GLASS_INNER} hover:text-white/70`
+                        }`}
+                      >
+                        {p}
+                      </button>
+                    ))}
+                  </div>
+                  <input
+                    type="url"
+                    placeholder={t('notifications.webhookUrl')}
+                    value={webhookForm.webhookUrl}
+                    onChange={(e) => setWebhookForm({ ...webhookForm, webhookUrl: e.target.value })}
+                    className={inputClass}
+                  />
+                  <button
+                    onClick={handleCreateWebhook}
+                    disabled={webhookLoading || !webhookForm.name || !webhookForm.webhookUrl}
+                    className={`w-full flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-bold bg-white text-black hover:bg-neutral-200 disabled:opacity-50 ${TRANSITION}`}
+                  >
+                    {webhookLoading ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
+                    {t('notifications.addWebhook')}
+                  </button>
+                </div>
+              )}
+
+              {webhooks.length === 0 && !showWebhookForm ? (
+                <div className={`rounded-2xl p-8 flex flex-col items-center gap-3 ${GLASS_INNER}`}>
+                  <Zap size={28} className="text-white/15" />
+                  <p className="text-xs text-white/25 text-center">{t('notifications.noWebhooks')}</p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {webhooks.map((wh) => (
+                    <div key={wh.id} className={`rounded-2xl p-4 ${GLASS_INNER}`}>
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="flex items-center gap-2">
+                          <span className={`text-[9px] font-bold uppercase px-2 py-0.5 rounded-md ${
+                            wh.platform === 'discord' ? 'bg-indigo-500/20 text-indigo-400' :
+                            wh.platform === 'telegram' ? 'bg-sky-500/20 text-sky-400' :
+                            'bg-green-500/20 text-green-400'
+                          }`}>{wh.platform}</span>
+                          <p className="text-sm font-semibold text-white/80">{wh.name}</p>
+                        </div>
+                        <div className="flex items-center gap-1">
+                          <button
+                            onClick={() => handleTestWebhook(wh.id)}
+                            className={`p-1.5 rounded-lg text-white/30 hover:text-amber-400 hover:bg-white/[0.06] ${TRANSITION}`}
+                          >
+                            <Send size={12} />
+                          </button>
+                          <button
+                            onClick={() => handleToggleWebhook(wh)}
+                            className={`relative w-9 h-5 rounded-full transition-all duration-300 ${
+                              wh.isActive ? 'bg-green-500' : 'bg-white/10'
+                            }`}
+                          >
+                            <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-all duration-300 ${
+                              wh.isActive ? 'left-[18px]' : 'left-0.5'
+                            }`} />
+                          </button>
+                          <button
+                            onClick={() => handleDeleteWebhook(wh.id)}
+                            className={`p-1.5 rounded-lg text-white/30 hover:text-red-400 hover:bg-white/[0.06] ${TRANSITION}`}
+                          >
+                            <X size={12} />
+                          </button>
+                        </div>
+                      </div>
+                      <p className="text-[10px] text-white/25 font-mono truncate">{wh.webhookUrl}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </>
         )}

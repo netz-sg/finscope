@@ -2,8 +2,9 @@ import { useState, useRef, useEffect, type FormEvent } from 'react'
 import {
   Settings, Server, Info, Github, Coffee, Trash2, Globe,
   User, Camera, Check, Loader2, Eye, EyeOff, KeyRound, Pencil, RotateCcw,
-  Bell, Plus, X, Send, Zap,
+  Bell, Plus, X, Send, Zap, Tag,
 } from 'lucide-react'
+import { VERSION } from '../../version'
 import { useTranslation } from 'react-i18next'
 import { useAppStore } from '../../store/useAppStore'
 import { useUIStore } from '../../store/useUIStore'
@@ -708,16 +709,91 @@ export default function SettingsView() {
                 <p className="text-white/40 text-xs font-mono tracking-widest uppercase mt-1">
                   {t('app.subtitle')}
                 </p>
-                <p className="text-[10px] font-mono text-white/30 mt-2">
-                  {t('app.version')}
-                </p>
+                <div className="flex items-center gap-2 mt-3">
+                  <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-bold font-mono bg-white/8 text-white/60 border border-white/[0.08]">
+                    <Tag size={10} />
+                    v{VERSION.version}
+                    {VERSION.releaseName ? ` — ${VERSION.releaseName}` : ''}
+                  </span>
+                  <span className="text-[10px] font-mono text-white/25">{VERSION.date}</span>
+                </div>
               </div>
 
-              <div className={`rounded-2xl p-5 ${GLASS_INNER}`}>
+              <div className={`rounded-2xl p-5 mb-4 ${GLASS_INNER}`}>
                 <p className="text-sm text-white/50 leading-relaxed">
                   {t('settings.description')}
                 </p>
               </div>
+
+              {(VERSION.changelog.added.length + VERSION.changelog.fixed.length + VERSION.changelog.changed.length + VERSION.changelog.removed.length) > 0 && (
+                <div className={`rounded-2xl p-5 ${GLASS_INNER}`}>
+                  <p className="text-[10px] font-bold text-white/40 uppercase tracking-widest mb-4">
+                    {t('about.whatsNew')}
+                  </p>
+                  <div className="space-y-3">
+                    {VERSION.changelog.added.length > 0 && (
+                      <div>
+                        <p className="text-[9px] font-bold uppercase tracking-widest text-emerald-400/70 mb-1.5">
+                          {t('about.added')}
+                        </p>
+                        <ul className="space-y-1">
+                          {VERSION.changelog.added.map((item, i) => (
+                            <li key={i} className="flex items-start gap-2 text-[12px] text-white/55">
+                              <span className="mt-1 w-1 h-1 rounded-full bg-emerald-400/50 flex-shrink-0" />
+                              {item}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                    {VERSION.changelog.fixed.length > 0 && (
+                      <div>
+                        <p className="text-[9px] font-bold uppercase tracking-widest text-amber-400/70 mb-1.5">
+                          {t('about.fixed')}
+                        </p>
+                        <ul className="space-y-1">
+                          {VERSION.changelog.fixed.map((item, i) => (
+                            <li key={i} className="flex items-start gap-2 text-[12px] text-white/55">
+                              <span className="mt-1 w-1 h-1 rounded-full bg-amber-400/50 flex-shrink-0" />
+                              {item}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                    {VERSION.changelog.changed.length > 0 && (
+                      <div>
+                        <p className="text-[9px] font-bold uppercase tracking-widest text-blue-400/70 mb-1.5">
+                          {t('about.changed')}
+                        </p>
+                        <ul className="space-y-1">
+                          {VERSION.changelog.changed.map((item, i) => (
+                            <li key={i} className="flex items-start gap-2 text-[12px] text-white/55">
+                              <span className="mt-1 w-1 h-1 rounded-full bg-blue-400/50 flex-shrink-0" />
+                              {item}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                    {VERSION.changelog.removed.length > 0 && (
+                      <div>
+                        <p className="text-[9px] font-bold uppercase tracking-widest text-red-400/70 mb-1.5">
+                          {t('about.removed')}
+                        </p>
+                        <ul className="space-y-1">
+                          {VERSION.changelog.removed.map((item, i) => (
+                            <li key={i} className="flex items-start gap-2 text-[12px] text-white/55">
+                              <span className="mt-1 w-1 h-1 rounded-full bg-red-400/50 flex-shrink-0" />
+                              {item}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Links & Tour */}

@@ -220,6 +220,13 @@
     "lastSync": "Last Sync",
     "codecsInUse": "Active Codecs"
   },
+  "about": {
+    "whatsNew": "What's New",
+    "added": "Added",
+    "fixed": "Fixed",
+    "changed": "Changed",
+    "removed": "Removed"
+  },
   "settings": {
     "title": "System Configuration & Info",
     "localServer": "Local Server",

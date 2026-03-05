@@ -16,6 +16,8 @@ RUN npx tsc
 
 # Stage 3: Production
 FROM node:22-alpine AS production
+ARG APP_VERSION=dev
+LABEL org.opencontainers.image.version="${APP_VERSION}"
 RUN apk add --no-cache nginx supervisor
 
 # Copy frontend build
